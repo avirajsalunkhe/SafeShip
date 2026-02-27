@@ -12,8 +12,20 @@
         import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // CONFIG & INIT
-        const firebaseConfig = JSON.parse(__firebase_config);
+        /**
+         * SECURE CONFIGURATION BLOCK
+         * These placeholders are replaced during the GitHub Actions deployment process.
+         * Using a try-catch for the JSON parse to ensure local development doesn't crash.
+         */
+        let firebaseConfig;
+        try {
+            const rawConfig = '__FIREBASE_CONFIG_JSON__';
+            firebaseConfig = rawConfig.startsWith('__') ? {} : JSON.parse(rawConfig);
+        } catch (e) {
+            console.error("Neural Config Parse Error:", e);
+            firebaseConfig = {};
+        }
+
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
