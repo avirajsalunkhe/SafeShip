@@ -3,9 +3,8 @@ name: Inject Secrets and Deploy
 on:
   push:
     branches:
-      - main # Primary development branch
+      - main
 
-# Explicit permissions required for GitHub Pages and writing to the repository
 permissions:
   contents: write
   pages: write
@@ -18,31 +17,36 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Inject Neural Secrets
+      - name: Inject Neural Secrets (Safe Python Mode)
+        shell: python
+        env:
+          GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_KEY: ${{ secrets.GROQ_API_KEY }}
+          FB_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
         run: |
-          # The sed command replaces the placeholders in index.html with the GitHub Secrets.
-          # We use '|' as a delimiter to handle potential special characters in the API keys.
+          import os
+
+          # Read the original file
+          with open('index.html', 'r', encoding='utf-8') as f:
+              content = f.read()
+
+          # Using Python's .replace() is safe for multi-line JSON and special characters
+          # It doesn't care about slashes, quotes, or newlines in your secrets
+          content = content.replace('__GEMINI_API_KEY__', os.environ.get('GEMINI_KEY', ''))
+          content = content.replace('__GROQ_API_KEY__', os.environ.get('GROQ_KEY', ''))
+          content = content.replace('__FIREBASE_CONFIG_JSON__', os.environ.get('FB_CONFIG', '{}'))
+
+          # Write the injected file
+          with open('index.html', 'w', encoding='utf-8') as f:
+              f.write(content)
           
-          echo "Initiating Secret Injection..."
-          
-          # Inject Gemini API Key
-          sed -i "s|__GEMINI_API_KEY__|${{ secrets.GEMINI_API_KEY }}|g" index.html
-          
-          # Inject Groq API Key
-          sed -i "s|__GROQ_API_KEY__|${{ secrets.GROQ_API_KEY }}|g" index.html
-          
-          # Inject Firebase Config
-          # Note: We wrap the secret in single quotes to ensure it remains a valid string in the JS context.
-          sed -i "s|__firebase_config|'${{ secrets.FIREBASE_CONFIG }}'|g" index.html
-          
-          echo "Injection Complete."
+          print("Neural Handshake Successful: Secrets injected via Python Safe-Buffer.")
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./
-          # Using a custom committer to help distinguish automated pushes
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: "Neural Deployment: Version Update [skip ci]"
+          commit_message: "Neural Deployment: v6.0.4 Injection Success [skip ci]"
