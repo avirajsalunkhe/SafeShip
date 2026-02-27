@@ -13,6 +13,9 @@
         import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // 1. Initialize Global Context IMMEDIATELY to prevent "undefined" errors
+        // We try to grab the environment's apiKey if the placeholder hasn't been replaced by GitHub Actions.
+        const runtimeApiKey = (typeof apiKey !== 'undefined' && apiKey) ? apiKey : "AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA";
+        
         window.SAFESHIP_CONTEXT = {
             db: null,
             auth: null,
@@ -21,7 +24,7 @@
             history: [],
             currentFiles: [],
             sessionKeys: {
-                gemini: "AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA",
+                gemini: runtimeApiKey,
                 groq: "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"
             }
         };
@@ -32,10 +35,13 @@
          */
         let firebaseConfig = null;
         try {
-            // Check platform provided config first, then fall back to manual injection placeholder
+            // Priority 1: Check platform provided config (Canvas/Artifacts environment)
             if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                firebaseConfig = JSON.parse(__firebase_config);
-            } else {
+                firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
+            } 
+            
+            // Priority 2: Fall back to manual injection placeholder (GitHub Actions)
+            if (!firebaseConfig || !firebaseConfig.apiKey) {
                 const rawInjected = '{
   apiKey: "AIzaSyB_d7N2FTeD0mrO-odMx2ajwtVIHOOKig0",
   authDomain: "safeship-trace.firebaseapp.com",
@@ -91,8 +97,14 @@
             }
         } else {
             console.warn("SafeShip: Neural Persistence node is offline (Missing Config).");
-            const statusLabel = document.getElementById('statusLabel');
-            if (statusLabel) statusLabel.innerText = "Persistence Offline";
+            // Ensure UI shows offline status
+            setTimeout(() => {
+                const statusLabel = document.getElementById('statusLabel');
+                if (statusLabel) {
+                    statusLabel.innerText = "Persistence Offline";
+                    statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-zinc-600";
+                }
+            }, 100);
         }
 
         function loadHistory(userId) {
@@ -295,6 +307,7 @@
             const statusPulse = document.getElementById('statusPulse');
             const statusLabel = document.getElementById('statusLabel');
             
+            // A key is linked if it's not the placeholder __ string
             const isGeminiLinked = keys.gemini && !keys.gemini.startsWith("__");
 
             if (isGeminiLinked) {
@@ -303,7 +316,7 @@
                 statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-emerald-500";
             } else {
                 statusPulse.className = "w-2 h-2 rounded-full bg-rose-500";
-                statusLabel.innerText = "Secret Injection Error";
+                statusLabel.innerText = "Secret Rejection Error";
                 statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-rose-500";
             }
         }
@@ -360,7 +373,7 @@
 
             try {
                 if (window.SAFESHIP_CONTEXT.sessionKeys.gemini.startsWith("__")) 
-                    throw new Error("Neural Nodes inactive. Verify GitHub Secrets.");
+                    throw new Error("Neural Nodes inactive. Verify GitHub Secrets or Environment Variables.");
 
                 let reportData;
                 if (auditMode === 'url') {
