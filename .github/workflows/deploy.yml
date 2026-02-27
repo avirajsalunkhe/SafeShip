@@ -17,7 +17,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Inject Telemetry and Secrets (Safe Python Mode)
+      - name: Inject Neural Secrets (Safe Python Mode)
         shell: python
         env:
           GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -29,44 +29,38 @@ jobs:
             import json
 
             filename = 'index.html'
-            if not os.path.exists(filename):
-                print(f"[!] CRITICAL: {filename} not found in root directory.")
-                sys.exit(1)
-
             with open(filename, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            # Mapping GitHub Secrets to internal placeholders
             replacements = {
                 '__GEMINI_API_KEY__': os.environ.get('GEMINI_KEY', ''),
                 '__GROQ_API_KEY__': os.environ.get('GROQ_KEY', ''),
                 '__FIREBASE_CONFIG_JSON__': os.environ.get('FB_CONFIG', '{}')
             }
 
-            # Neural Integrity Check
             failed_injection = False
             for placeholder, value in replacements.items():
-                # Check if secret exists
                 if not value or value.strip() == "" or value == "{}":
                     print(f"[!] TELEMETRY ALERT: Secret for {placeholder} is missing in GitHub Repository Settings.")
                     failed_injection = True
                     continue
                 
-                # Special validation for Firebase Config JSON
+                # Critical validation for Firebase JSON format
                 if placeholder == '__FIREBASE_CONFIG_JSON__':
                     try:
                         json.loads(value)
                         print("[*] TELEMETRY: FIREBASE_CONFIG validated as valid JSON.")
                     except ValueError as e:
-                        print(f"[!] CRITICAL: FIREBASE_CONFIG is NOT valid JSON. Error: {str(e)}")
-                        print("[?] HINT: Ensure your secret contains ONLY the { ... } object, no variable names.")
+                        print(f"[!] CRITICAL ERROR: FIREBASE_CONFIG is NOT valid JSON.")
+                        print(f"[DEBUG]: {str(e)}")
+                        print("[HINT]: Use double quotes for all keys and strings. No trailing commas.")
                         failed_injection = True
                 
-                print(f"[*] TELEMETRY: Successfully prepared injection for {placeholder}.")
+                print(f"[*] TELEMETRY: Prepared injection for {placeholder}.")
                 content = content.replace(placeholder, value)
 
             if failed_injection:
-                print("[!] DEPLOYMENT ABORTED: One or more critical Neural Nodes are missing or malformed secrets.")
+                print("[!] DEPLOYMENT ABORTED: One or more critical Neural Nodes are missing or malformed.")
                 sys.exit(1)
 
             with open(filename, 'w', encoding='utf-8') as f:
@@ -81,4 +75,4 @@ jobs:
           publish_dir: ./
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: "Neural v6.2.1: Production Deployment [skip ci]"
+          commit_message: "Neural v6.2.2: Production Deployment [skip ci]"
