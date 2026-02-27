@@ -19,10 +19,11 @@
          */
         let firebaseConfig;
         try {
+            // The placeholder below is replaced by the actual JSON string from GitHub Secrets
             const rawConfig = '__FIREBASE_CONFIG_JSON__';
             firebaseConfig = rawConfig.startsWith('__') ? {} : JSON.parse(rawConfig);
         } catch (e) {
-            console.error("Neural Config Parse Error:", e);
+            console.error("Neural Config Parse Error: Verify FIREBASE_CONFIG secret format.", e);
             firebaseConfig = {};
         }
 
@@ -368,6 +369,9 @@
 
             try {
                 let reportData;
+                const keys = window.SAFESHIP_CONTEXT.sessionKeys;
+                if (keys.gemini.startsWith("__")) throw new Error("Neural Node disconnected. Link your API keys in GitHub Secrets.");
+
                 if (auditMode === 'url') {
                     const url = document.getElementById('urlInput').value.trim();
                     if(!url) throw new Error("Target URL required");
@@ -411,8 +415,6 @@
 
         async function callGemini(prompt) {
             const key = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
-            if (key.startsWith("__")) throw new Error("CRITICAL: GitHub Secrets are not linked. Check environment configuration.");
-
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`;
             const payload = {
                 contents: [{ parts: [{ text: prompt }] }],
@@ -443,6 +445,10 @@
             };
 
             const response = await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error?.message || "Gemini Node Failure");
+            }
             const data = await response.json();
             return JSON.parse(data.candidates[0].content.parts[0].text);
         }
