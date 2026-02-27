@@ -17,42 +17,44 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Inject Telemetry and Secrets (Python Mode)
+      - name: Inject Telemetry and Secrets (Safe Python Mode)
         shell: python
         env:
           GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_KEY: ${{ secrets.GROQ_API_KEY }}
           FB_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
         run: |
-          import os
+            import os
 
-          filename = 'index.html'
-          with open(filename, 'r', encoding='utf-8') as f:
-              content = f.read()
+            filename = 'index.html'
+            with open(filename, 'r', encoding='utf-8') as f:
+                content = f.read()
 
-          # Replace placeholders from GitHub Secrets environment
-          # Using environment variables prevents shell-level escaping issues
-          replacements = {
-              '__GEMINI_API_KEY__': os.environ.get('GEMINI_KEY', ''),
-              '__GROQ_API_KEY__': os.environ.get('GROQ_KEY', ''),
-              '__FIREBASE_CONFIG_JSON__': os.environ.get('FB_CONFIG', '{}')
-          }
+            # Replacing placeholders with actual secrets from GitHub vault
+            # Python variables are used to prevent terminal escaping errors
+            replacements = {
+                '__GEMINI_API_KEY__': os.environ.get('GEMINI_KEY', ''),
+                '__GROQ_API_KEY__': os.environ.get('GROQ_KEY', ''),
+                '__FIREBASE_CONFIG_JSON__': os.environ.get('FB_CONFIG', '{}')
+            }
 
-          for placeholder, value in replacements.items():
-              if not value:
-                  print(f"[!] Warning: Placeholder {placeholder} is empty. Verify GitHub Secrets.")
-              content = content.replace(placeholder, value)
+            for placeholder, value in replacements.items():
+                if not value or value.strip() == "":
+                    print(f"[!] TELEMETRY ALERT: {placeholder} is EMPTY in GitHub Secrets.")
+                else:
+                    print(f"[*] TELEMETRY: Injected secret into {placeholder}.")
+                content = content.replace(placeholder, value)
 
-          with open(filename, 'w', encoding='utf-8') as f:
-              f.write(content)
-          
-          print("[*] Neural Injection Success: Local placeholders swapped for secrets.")
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            print("[*] Handshake Success: index.html prepared for production.")
 
-      - name: Deploy Artifacts to GitHub Pages
+      - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: "Neural Trace v6.2: Telemetry Update [skip ci]"
+          commit_message: "Neural v6.2.1: Production Deployment [skip ci]"
