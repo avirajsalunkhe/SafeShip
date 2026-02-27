@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SafeShip | Neural Trace Engine v6.2.4</title>
+    <title>SafeShip | Neural Trace Engine v6.2.3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
@@ -12,32 +12,29 @@
         import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- INTERNAL TELEMETRY ---
+        // --- NEURAL TELEMETRY SYSTEM ---
         window.neuralTelemetry = (component, message, data = null) => {
             const time = new Date().toLocaleTimeString();
             console.log(`%c[NEURAL] [${time}] [${component}] %c${message}`, "color: #10b981; font-weight: bold;", "color: #a1a1aa;", data || "");
         };
 
-        // Key resolution priority: 1. Injected Secret 2. App Environment
-        const getSecret = (placeholder) => {
-            if (placeholder && !placeholder.startsWith("__") && placeholder !== "") return placeholder;
-            return null;
+        const detectGeminiKey = () => {
+            if (typeof apiKey !== 'undefined' && apiKey && apiKey !== "") return apiKey;
+            const placeholder = "AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA";
+            if (placeholder && !placeholder.startsWith("__")) return placeholder;
+            return ""; 
         };
 
         window.SAFESHIP_CONTEXT = {
             db: null, auth: null,
             appId: typeof __app_id !== 'undefined' ? __app_id : 'safeship-trace-v6',
             user: null, history: [], currentFiles: [],
-            sessionKeys: { 
-                gemini: getSecret("AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA"), 
-                groq: getSecret("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") 
-            }
+            sessionKeys: { gemini: detectGeminiKey(), groq: "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" }
         };
 
-        // --- FIREBASE INITIALIZATION ---
-        const initFirebase = async () => {
-            let config = null;
-            const injectedConfig = '{
+        // --- SECURE HANDSHAKE LOGIC ---
+        let firebaseConfig = null;
+        const rawInjected = '{
   apiKey: "AIzaSyB_d7N2FTeD0mrO-odMx2ajwtVIHOOKig0",
   authDomain: "safeship-trace.firebaseapp.com",
   projectId: "safeship-trace",
@@ -45,54 +42,63 @@
   messagingSenderId: "538497558292",
   appId: "1:538497558292:web:0e512311b343b5ec1f0401",
   measurementId: "G-Z097L20KCF"
-};';
+}';
 
-            try {
-                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                    config = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
-                } else if (getSecret(injectedConfig)) {
-                    config = JSON.parse(injectedConfig);
-                }
-            } catch (e) {
-                neuralTelemetry("Handshake", "Config Parse Error", e);
+        try {
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
+            } 
+            else if (rawInjected && !rawInjected.startsWith('__') && rawInjected !== '{}') {
+                firebaseConfig = JSON.parse(rawInjected);
+                neuralTelemetry("Persistence", "GitHub Cloud node linked successfully.");
             }
+        } catch (e) { 
+            neuralTelemetry("Config", "FATAL: Firebase Secret is malformed.", e);
+            window.handshakeError = e.message;
+        }
 
-            if (config && config.apiKey) {
-                try {
-                    const app = initializeApp(config);
-                    const auth = getAuth(app);
-                    const db = getFirestore(app);
-                    window.SAFESHIP_CONTEXT.auth = auth;
-                    window.SAFESHIP_CONTEXT.db = db;
+        if (firebaseConfig && firebaseConfig.apiKey) {
+            try {
+                const app = initializeApp(firebaseConfig);
+                const auth = getAuth(app);
+                const db = getFirestore(app);
+                window.SAFESHIP_CONTEXT.auth = auth;
+                window.SAFESHIP_CONTEXT.db = db;
 
-                    onAuthStateChanged(auth, (user) => {
-                        window.SAFESHIP_CONTEXT.user = user;
+                onAuthStateChanged(auth, (user) => {
+                    window.SAFESHIP_CONTEXT.user = user;
+                    if (user) {
                         const uidEl = document.getElementById('userIdText');
-                        if (uidEl) uidEl.innerText = user ? user.uid : "Disconnected";
-                        if (user) loadHistory(user.uid);
-                    });
-                    
+                        if (uidEl) uidEl.innerText = user.uid;
+                        loadHistory(user.uid);
+                    }
+                });
+                
+                (async () => {
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                         await signInWithCustomToken(auth, __initial_auth_token);
-                    } else { 
-                        await signInAnonymously(auth); 
-                    }
-                    neuralTelemetry("Persistence", "Cloud Uplink Established.");
-                } catch (e) {
-                    neuralTelemetry("Firebase", "Initialization Failed", e);
+                    } else { await signInAnonymously(auth); }
+                })();
+            } catch (e) { neuralTelemetry("Firebase", "Fatal Initialization Error", e); }
+        } else {
+            neuralTelemetry("Persistence", "STANDALONE MODE ACTIVE: History and Cloud Sync disabled.");
+            setTimeout(() => {
+                const sl = document.getElementById('statusLabel');
+                const diag = document.getElementById('diagnosticInfo');
+                if (sl) {
+                    sl.innerText = "Persistence Offline";
+                    sl.className = "text-[10px] font-black uppercase tracking-widest text-zinc-500";
                 }
-            } else {
-                neuralTelemetry("Persistence", "Offline Mode: Secret Injection Required.");
-                updateStatusUI("Offline", "text-zinc-500");
-            }
-        };
-
-        function updateStatusUI(label, colorClass) {
-            const sl = document.getElementById('statusLabel');
-            if (sl) {
-                sl.innerText = label;
-                sl.className = `text-[10px] font-black uppercase tracking-widest ${colorClass}`;
-            }
+                if (diag) {
+                    diag.innerHTML = `
+                        <div class="p-4 bg-rose-500/5 border border-rose-500/10 rounded-xl mt-4">
+                            <p class="text-[10px] font-black text-rose-500 uppercase mb-1">Handshake Advisory</p>
+                            <p class="text-xs text-zinc-500 leading-tight">Firebase Node is offline. If this is production, verify your <b>FIREBASE_CONFIG</b> secret uses strict JSON (double quotes for all keys).</p>
+                            ${window.handshakeError ? `<p class="text-[10px] font-mono text-rose-400 mt-2">Error: ${window.handshakeError}</p>` : ''}
+                        </div>
+                    `;
+                }
+            }, 1000);
         }
 
         function loadHistory(userId) {
@@ -103,228 +109,204 @@
                     .sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
                 window.SAFESHIP_CONTEXT.history = audits;
                 renderHistory();
-            }, (err) => neuralTelemetry("History", "Permission Error", err));
+            }, (err) => neuralTelemetry("History", "Permission Refused. Check Firestore Rules.", err));
         }
 
         window.saveAuditToCloud = async (auditData) => {
             const { db, user, appId } = window.SAFESHIP_CONTEXT;
             if (!db || !user) return;
-            try {
-                await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'audits'), {
-                    ...auditData, timestamp: serverTimestamp()
-                });
-            } catch(e) { neuralTelemetry("Storage", "Save Failed", e); }
+            await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'audits'), {
+                ...auditData, timestamp: serverTimestamp()
+            });
         };
 
         window.deleteAudit = async (auditId) => {
             const { db, user, appId } = window.SAFESHIP_CONTEXT;
             if (!db || !user) return;
             try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'audits', auditId)); } 
-            catch (e) { neuralTelemetry("Storage", "Delete Failed", e); }
+            catch (e) { neuralTelemetry("History", "Delete Failed", e); }
         };
-
-        window.onload = () => {
-            lucide.createIcons();
-            initFirebase();
-            autoConfigureNodes();
-        };
-
-        function autoConfigureNodes() {
-            const hasGemini = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
-            const sp = document.getElementById('statusPulse');
-            const sl = document.getElementById('statusLabel');
-            if (hasGemini) {
-                sp.classList.add('bg-emerald-500', 'animate-pulse');
-                sl.innerText = "Neural Linked";
-                sl.classList.add('text-emerald-500');
-            }
-        }
     </script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
-        body { font-family: 'Space Grotesk', sans-serif; background-color: #020203; color: #f4f4f5; }
+        :root { --emerald-glow: rgba(16, 185, 129, 0.15); --bg-deep: #020203; }
+        body { font-family: 'Space Grotesk', sans-serif; background-color: var(--bg-deep); color: #f4f4f5; overflow-x: hidden; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
-        .neon-glow { box-shadow: 0 0 20px rgba(16, 185, 129, 0.1); }
-        .scanline::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, transparent, rgba(16, 185, 129, 0.03), transparent); animation: scan 4s linear infinite; pointer-events: none; }
-        @keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
+        .neon-border { box-shadow: 0 0 20px var(--emerald-glow); }
+        @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+        .scanline::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, transparent, rgba(16, 185, 129, 0.05), transparent); animation: scanline 4s linear infinite; pointer-events: none; }
+        @keyframes pulse-link { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.95); } }
+        .animate-link { animation: pulse-link 2s infinite ease-in-out; }
     </style>
 </head>
 <body class="selection:bg-emerald-500/30">
+    <div class="fixed -top-24 -left-24 w-96 h-96 bg-emerald-600/10 rounded-full blur-[120px] pointer-events-none"></div>
     <div class="flex h-screen overflow-hidden">
-        <!-- Sidebar -->
         <aside class="w-72 border-r border-zinc-800/50 bg-black/40 flex flex-col z-50">
             <div class="p-6 border-b border-zinc-800/50 flex items-center gap-3">
-                <div class="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center neon-glow"><i data-lucide="shield-check" class="w-5 h-5 text-black"></i></div>
-                <h1 class="text-lg font-bold">SafeShip <span class="text-emerald-500 text-sm">v6.2.4</span></h1>
+                <div class="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center neon-border"><i data-lucide="shield-check" class="w-5 h-5 text-black"></i></div>
+                <h1 class="text-lg font-bold tracking-tight">SafeShip <span class="text-emerald-500">v6.2</span></h1>
             </div>
             <div class="flex-1 overflow-y-auto p-4 space-y-4">
                 <span class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2">History Traces</span>
                 <div id="historyContainer" class="space-y-2"></div>
+                <div id="diagnosticInfo"></div>
             </div>
             <div class="p-4 border-t border-zinc-800/50">
                 <div class="flex items-center gap-3 p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
                     <div class="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center"><i data-lucide="user" class="w-4 h-4 text-zinc-400"></i></div>
-                    <div class="flex flex-col"><span class="text-[10px] text-zinc-500 uppercase font-black">Node ID</span><span id="userIdText" class="text-[10px] font-mono text-emerald-500 truncate w-32 tracking-tighter">Connecting...</span></div>
+                    <div class="flex flex-col"><span class="text-[10px] text-zinc-500 uppercase font-black">Secure ID</span><span id="userIdText" class="text-[10px] font-mono text-emerald-500 truncate w-32 tracking-tighter">Connecting...</span></div>
                 </div>
             </div>
         </aside>
-
-        <!-- Main Content -->
         <main class="flex-1 overflow-y-auto relative flex flex-col">
             <nav class="h-16 border-b border-zinc-800/50 flex items-center justify-between px-8 bg-black/20 backdrop-blur-md sticky top-0 z-40">
                 <div class="flex gap-8">
-                    <button onclick="setMode('url')" id="tab-url" class="text-xs font-black uppercase tracking-widest text-emerald-500 border-b-2 border-emerald-500 h-16">URL Scan</button>
-                    <button onclick="setMode('code')" id="tab-code" class="text-xs font-black uppercase tracking-widest text-zinc-500 h-16">SAST Audit</button>
+                    <button onclick="setMode('url')" id="modeTab-url" class="text-xs font-black uppercase tracking-widest text-emerald-500 border-b-2 border-emerald-500 h-16 transition-all">URL Scan</button>
+                    <button onclick="setMode('code')" id="modeTab-code" class="text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-200 h-16 transition-all">SAST Multi-File</button>
                 </div>
                 <div class="flex items-center gap-4">
-                    <div class="flex items-center gap-2 px-4 py-2 bg-zinc-900 rounded-xl border border-zinc-800">
+                    <div id="neuralStatus" class="flex items-center gap-2 px-4 py-2 bg-zinc-900 rounded-xl border border-zinc-800">
                         <div id="statusPulse" class="w-2 h-2 rounded-full bg-zinc-700"></div>
                         <span id="statusLabel" class="text-[10px] font-black uppercase tracking-widest text-zinc-500">Node Standby</span>
                     </div>
                 </div>
             </nav>
-
             <div class="p-8 max-w-5xl mx-auto w-full space-y-8">
                 <div id="urlSection" class="space-y-4">
                     <h2 class="text-4xl font-bold tracking-tighter">Deep <span class="text-emerald-500">Live</span> Probe.</h2>
                     <div class="flex gap-2">
-                        <input type="text" id="urlInput" placeholder="https://target-endpoint.com" class="flex-1 bg-zinc-900/50 border border-zinc-800 rounded-2xl py-4 px-6 text-sm outline-none focus:border-emerald-500/50">
-                        <button onclick="startAudit()" class="bg-emerald-500 text-black font-black px-8 rounded-2xl">INITIATE</button>
+                        <input type="text" id="urlInput" placeholder="https://target-endpoint.com" class="flex-1 bg-zinc-900/50 border border-zinc-800 rounded-2xl py-4 px-6 text-sm focus:border-emerald-500 outline-none">
+                        <button onclick="startAudit()" class="bg-emerald-500 text-black font-black px-8 rounded-2xl transition-transform active:scale-95">INITIATE</button>
                     </div>
                 </div>
-
                 <div id="codeSection" class="hidden space-y-4">
-                    <h2 class="text-4xl font-bold tracking-tighter">Neural <span class="text-emerald-500">SAST</span>.</h2>
-                    <div class="border-2 border-dashed border-zinc-800 rounded-3xl p-12 text-center bg-zinc-900/10 cursor-pointer hover:bg-zinc-900/20" onclick="document.getElementById('fileInput').click()">
+                    <h2 class="text-4xl font-bold tracking-tighter">Multi-File <span class="text-emerald-500">SAST</span>.</h2>
+                    <div class="border-2 border-dashed border-zinc-800 rounded-3xl p-12 text-center bg-zinc-900/10 cursor-pointer hover:bg-zinc-900/20 transition-all group" onclick="document.getElementById('fileInput').click()">
                         <input type="file" id="fileInput" multiple class="hidden" onchange="handleFiles(event)">
-                        <i data-lucide="upload-cloud" class="w-8 h-8 mx-auto mb-4 text-zinc-700"></i>
-                        <p class="text-sm font-bold">Drop files or click to upload</p>
+                        <i data-lucide="upload-cloud" class="w-8 h-8 mx-auto mb-4 text-zinc-700 group-hover:text-emerald-500 transition-colors"></i>
+                        <p class="text-sm font-bold">Upload Source Traces</p>
                     </div>
                     <div id="fileList" class="flex flex-wrap gap-2"></div>
                     <button id="codeAuditBtn" onclick="startAudit()" class="w-full bg-white text-black font-black py-4 rounded-2xl disabled:opacity-50" disabled>ANALYZE LOGIC</button>
                 </div>
-
                 <div id="resultsArea">
-                    <div id="idleState" class="h-[300px] border border-zinc-800/30 rounded-[2.5rem] flex flex-col items-center justify-center bg-black/20 scanline relative overflow-hidden">
-                        <i data-lucide="activity" class="w-10 h-10 text-zinc-800 mb-4"></i>
-                        <p class="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Awaiting Signal</p>
-                    </div>
-                    <div id="loadingState" class="hidden h-[300px] flex flex-col items-center justify-center">
-                        <p id="loadingPhase" class="text-xs font-mono text-emerald-500 uppercase tracking-widest animate-pulse">Syncing Nodes...</p>
-                    </div>
-                    <div id="contentState" class="hidden space-y-8 animate-in fade-in slide-in-from-bottom-4"></div>
+                    <div id="idleState" class="h-[400px] border border-zinc-800/50 rounded-[2.5rem] flex flex-col items-center justify-center bg-black/20 scanline relative overflow-hidden"><i data-lucide="activity" class="w-12 h-12 text-zinc-800 mb-4 animate-pulse"></i><p class="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Awaiting Signal</p></div>
+                    <div id="loadingState" class="hidden h-[400px] flex flex-col items-center justify-center"><p id="loadingPhase" class="text-xs font-mono text-emerald-500 uppercase tracking-widest animate-pulse">Syncing Neural Nodes...</p></div>
+                    <div id="contentState" class="hidden space-y-8"></div>
                 </div>
             </div>
         </main>
     </div>
-
     <script>
         let auditMode = 'url';
-        
-        function setMode(m) {
-            auditMode = m;
-            document.getElementById('urlSection').classList.toggle('hidden', m !== 'url');
-            document.getElementById('codeSection').classList.toggle('hidden', m !== 'code');
-            document.getElementById('tab-url').className = m === 'url' ? "text-xs font-black uppercase tracking-widest text-emerald-500 border-b-2 border-emerald-500 h-16" : "text-xs font-black uppercase tracking-widest text-zinc-500 h-16";
-            document.getElementById('tab-code').className = m === 'code' ? "text-xs font-black uppercase tracking-widest text-emerald-500 border-b-2 border-emerald-500 h-16" : "text-xs font-black uppercase tracking-widest text-zinc-500 h-16";
+        function autoConfigureNeuralNodes() {
+            const keys = window.SAFESHIP_CONTEXT.sessionKeys;
+            const sp = document.getElementById('statusPulse'), sl = document.getElementById('statusLabel');
+            if (keys.gemini && !keys.gemini.startsWith("__")) {
+                sp.className = "w-2 h-2 rounded-full bg-emerald-500 animate-link";
+                sl.innerText = "Neural Linked"; sl.className = "text-[10px] font-black uppercase text-emerald-500";
+            } else {
+                sp.className = "w-2 h-2 rounded-full bg-rose-500";
+                sl.innerText = "Neural Offline"; sl.className = "text-[10px] font-black uppercase text-rose-500";
+            }
         }
-
+        function setMode(m) { auditMode = m; document.getElementById('urlSection').classList.toggle('hidden', m !== 'url'); document.getElementById('codeSection').classList.toggle('hidden', m !== 'code'); }
         function handleFiles(e) {
             const files = Array.from(e.target.files), c = document.getElementById('fileList'); c.innerHTML = '';
             window.SAFESHIP_CONTEXT.currentFiles = [];
             files.forEach(file => {
                 const r = new FileReader(); r.onload = (ev) => {
                     window.SAFESHIP_CONTEXT.currentFiles.push({ name: file.name, content: ev.target.result });
-                    const d = document.createElement('div'); d.className = "bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-[10px] flex items-center gap-2";
+                    const d = document.createElement('div'); d.className = "bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-[10px] flex items-center gap-2 animate-in fade-in";
                     d.innerHTML = `<i data-lucide="file-code" class="w-3 h-3 text-emerald-500"></i> ${file.name}`; c.appendChild(d);
                     lucide.createIcons(); document.getElementById('codeAuditBtn').disabled = false;
                 }; r.readAsText(file);
             });
         }
-
         async function startAudit() {
             const ld = document.getElementById('loadingState'), id = document.getElementById('idleState'), ct = document.getElementById('contentState'), ph = document.getElementById('loadingPhase');
             id.classList.add('hidden'); ct.classList.add('hidden'); ld.classList.remove('hidden');
-            
             try {
-                const key = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
-                if (!key) throw new Error("Neural node missing. Ensure GEMINI_API_KEY is in GitHub Secrets.");
-                
-                let targetLabel, payload;
+                const keys = window.SAFESHIP_CONTEXT.sessionKeys;
+                if (!keys.gemini || keys.gemini.startsWith("__")) throw new Error("Neural Node disconnected. Deploy to GitHub to link secrets.");
+                let data;
                 if (auditMode === 'url') {
                     const u = document.getElementById('urlInput').value.trim(); if(!u) throw new Error("URL Required");
-                    targetLabel = u;
-                    ph.innerText = "Intercepting headers...";
-                    payload = `Conduct a security audit of this URL: ${u}`;
+                    ph.innerText = "Tracing Infrastructure..."; neuralTelemetry("Engine", `Starting URL Probe: ${u}`);
+                    const sc = await simulateScrape(u);
+                    data = await callGemini(`Audit website: ${u}. Context: ${sc}`); data.target = u;
                 } else {
-                    targetLabel = "Repository Trace";
-                    ph.innerText = "Analyzing semantic flow...";
-                    payload = "SAST Audit Report for these files:\n" + window.SAFESHIP_CONTEXT.currentFiles.map(f => `File: ${f.name}\n${f.content}`).join('\n\n');
+                    ph.innerText = "Analyzing Repository Architecture...";
+                    const code = window.SAFESHIP_CONTEXT.currentFiles.map(f => `File: ${f.name}\n${f.content}`).join('\n\n');
+                    data = await callGemini(`SAST Audit: ${code}`); data.target = "Repo Trace";
                 }
-
-                const data = await callGemini(payload);
-                data.target = targetLabel;
-                await window.saveAuditToCloud(data);
-                renderResults(data);
-            } catch (err) {
-                neuralTelemetry("Error", err.message);
-                ld.classList.add('hidden'); id.classList.remove('hidden');
-                alert(err.message);
+                await window.saveAuditToCloud(data); renderResults(data);
+            } catch (err) { 
+                neuralTelemetry("Probe", "Audit Exception", err.message);
+                const msg = document.createElement('div'); msg.className = "p-4 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-xl text-xs font-bold text-center mt-4 animate-bounce";
+                msg.innerText = err.message; document.getElementById('resultsArea').appendChild(msg);
+                setTimeout(() => msg.remove(), 5000);
+                ld.classList.add('hidden'); id.classList.remove('hidden'); 
             }
         }
-
-        async function callGemini(prompt) {
-            const key = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`;
-            const body = {
-                contents: [{ parts: [{ text: prompt + "\nRespond ONLY in valid JSON matching the schema: {score: number, summary: string, findings: [{title: string, severity: string, description: string, location: string, fix: string}]}" }] }],
-                generationConfig: { responseMimeType: "application/json" }
-            };
-            const r = await fetch(url, { method: 'POST', body: JSON.stringify(body) });
-            if (!r.ok) throw new Error(`Node Refused Connection (HTTP ${r.status})`);
-            const res = await r.json();
-            return JSON.parse(res.candidates[0].content.parts[0].text);
+        async function simulateScrape(u) {
+            try { const r = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(u)}`); const d = await r.json(); return d.contents.substring(0, 4000); }
+            catch (e) { return "Scrape Data Restricted."; }
         }
-
+        async function callGemini(p) {
+            const k = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
+            const u = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${k}`;
+            const payload = { contents: [{ parts: [{ text: p }] }], generationConfig: { responseMimeType: "application/json", responseSchema: { type: "OBJECT", properties: { score: { type: "NUMBER" }, summary: { type: "STRING" }, findings: { type: "ARRAY", items: { type: "OBJECT", properties: { title: { type: "STRING" }, severity: { type: "STRING" }, description: { type: "STRING" }, location: { type: "STRING" }, fix: { type: "STRING" } } } } } } } };
+            const r = await fetch(u, { method: 'POST', body: JSON.stringify(payload) });
+            if (!r.ok) {
+                const errData = await r.json().catch(() => ({}));
+                neuralTelemetry("Gemini-Node", `HTTP ${r.status}`, errData);
+                throw new Error(`Neural Node Refused Connection (HTTP ${r.status})`);
+            }
+            const d = await r.json(); return JSON.parse(d.candidates[0].content.parts[0].text);
+        }
         function renderResults(d) {
-            const ct = document.getElementById('contentState');
-            document.getElementById('loadingState').classList.add('hidden');
-            ct.classList.remove('hidden');
+            const ct = document.getElementById('contentState'); document.getElementById('loadingState').classList.add('hidden'); ct.classList.remove('hidden');
             ct.innerHTML = `
                 <div class="flex justify-between items-end">
-                    <div><span class="text-[10px] font-black uppercase text-zinc-500 tracking-widest">Security Score</span><h3 class="text-6xl font-bold tracking-tighter">${d.score}%</h3></div>
-                    <button onclick="resetUI()" class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-white"><i data-lucide="refresh-cw"></i></button>
+                    <div><span class="text-[10px] font-black uppercase text-zinc-500 tracking-widest">Verdict</span><h3 class="text-6xl font-bold tracking-tighter">${d.score}%</h3></div>
+                    <div class="flex gap-2">
+                        <button onclick='exportJSON(${JSON.stringify(d).replace(/'/g, "&apos;")})' class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-white" title="Export JSON"><i data-lucide="download"></i></button>
+                        <button onclick='resetUI()' class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-rose-500" title="Reset"><i data-lucide="refresh-cw"></i></button>
+                    </div>
                 </div>
-                <div class="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-3xl text-sm text-zinc-400 leading-relaxed">${d.summary}</div>
+                <div class="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-[2rem] text-sm text-zinc-400 leading-relaxed">${d.summary}</div>
                 <div class="space-y-4">${d.findings.map(f => `
-                    <div class="bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6">
+                    <div class="bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6 group transition-all hover:border-zinc-700">
                         <div class="flex justify-between items-start mb-2"><h4 class="font-bold text-white">${f.title}</h4><span class="text-[10px] px-2 py-0.5 rounded bg-black border border-zinc-800 text-zinc-500 font-mono">${f.severity.toUpperCase()}</span></div>
-                        <p class="text-xs text-zinc-500 font-mono mb-2">${f.location}</p>
-                        <p class="text-sm text-zinc-400 mb-4">${f.description}</p>
-                        <div class="p-4 bg-black/60 rounded-xl border border-emerald-500/10">
-                            <p class="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-1">Recommended Fix</p>
-                            <code class="text-xs font-mono text-emerald-400 whitespace-pre-wrap">${f.fix}</code>
+                        <p class="text-xs text-zinc-500 font-mono mb-2">${f.location}</p><p class="text-sm text-zinc-400 mb-4">${f.description}</p>
+                        <div class="p-4 bg-black/40 rounded-xl border border-emerald-500/10 relative">
+                            <p class="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-2">Neural Fix</p>
+                            <code class="text-xs font-mono text-emerald-400 whitespace-pre-wrap block pr-8">${f.fix}</code>
+                            <button onclick="copyToClipboard(\`${f.fix.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)" class="absolute top-4 right-4 p-2 bg-zinc-900 rounded-lg text-zinc-600 hover:text-emerald-500 opacity-0 group-hover:opacity-100"><i data-lucide="copy" class="w-3 h-3"></i></button>
                         </div>
-                    </div>`).join('')}</div>`;
-            lucide.createIcons();
+                    </div>`).join('')}</div>`; lucide.createIcons();
         }
-
         function renderHistory() {
             const h = window.SAFESHIP_CONTEXT.history, c = document.getElementById('historyContainer');
-            if (!h.length) { c.innerHTML = '<p class="text-[10px] text-center text-zinc-700 mt-4 uppercase font-bold">No Trace History</p>'; return; }
+            if (h.length === 0) { c.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold border border-zinc-900 rounded-xl">No Records Found</div>`; return; }
             c.innerHTML = h.map(i => `
-                <div class="group p-3 bg-zinc-900/30 border border-zinc-800/50 rounded-xl hover:border-emerald-500/30 cursor-pointer transition-all relative">
-                    <div onclick='renderResults(${JSON.stringify(i).replace(/'/g, "&apos;")})' class="pr-6">
-                        <div class="flex justify-between items-center mb-1"><span class="text-[10px] font-bold text-emerald-500">${i.score}%</span><span class="text-[8px] text-zinc-600 font-mono">${i.timestamp ? new Date(i.timestamp.seconds * 1000).toLocaleDateString() : 'Syncing'}</span></div>
-                        <p class="text-[10px] font-medium text-zinc-400 truncate">${i.target}</p>
+                <div class="group p-3 bg-zinc-900/30 border border-zinc-800/50 rounded-xl hover:border-emerald-500/50 cursor-pointer transition-all relative">
+                    <div onclick='renderResults(${JSON.stringify(i).replace(/'/g, "&apos;")})' class="pr-8">
+                        <div class="flex justify-between items-center mb-1"><span class="text-[10px] font-bold text-emerald-500">${i.score}%</span><span class="text-[9px] text-zinc-600 font-mono">${i.timestamp ? new Date(i.timestamp.seconds * 1000).toLocaleDateString() : 'Syncing'}</span></div>
+                        <p class="text-[11px] font-medium text-zinc-400 truncate">${i.target || 'Trace'}</p>
                     </div>
-                    <button onclick="deleteAudit('${i.id}')" class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
-                </div>`).join('');
-            lucide.createIcons();
+                    <button onclick="deleteAudit('${i.id}')" class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-zinc-700 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+                </div>`).join(''); lucide.createIcons();
         }
-
-        window.resetUI = () => { location.reload(); };
+        window.copyToClipboard = (t) => { const el = document.createElement('textarea'); el.value = t; document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el); };
+        window.resetUI = () => { document.getElementById('contentState').classList.add('hidden'); document.getElementById('idleState').classList.remove('hidden'); document.getElementById('urlInput').value = ''; document.getElementById('fileList').innerHTML = ''; document.getElementById('codeAuditBtn').disabled = true; };
+        window.exportJSON = (d) => { const b = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = `report-${Date.now()}.json`; a.click(); };
+        window.onload = () => { lucide.createIcons(); setMode('url'); autoConfigureNeuralNodes(); };
     </script>
 </body>
 </html>
