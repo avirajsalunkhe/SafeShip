@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SafeShip | Neural Trace Engine v7.0</title>
+    <title>SafeShip | Neural Trace Engine</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -50,7 +50,6 @@
         .logo-icon { width: 32px; height: 32px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .logo-icon svg { color: #000; width: 18px; height: 18px; }
         .logo-text { font-size: 15px; font-weight: 800; letter-spacing: -0.5px; }
-        .logo-version { font-family: var(--font-mono); font-size: 9px; color: var(--accent); letter-spacing: 1px; margin-top: 1px; }
 
         .sidebar-nav { padding: 8px; border-bottom: 1px solid var(--border); }
         .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; color: var(--muted); transition: all 0.15s; border: 1px solid transparent; }
@@ -71,6 +70,15 @@
         .history-item:hover .history-delete { opacity: 1; }
 
         .sidebar-footer { padding: 12px; border-top: 1px solid var(--border); }
+        .credit-footer { margin-top: 2px; }
+        .credit-divider { height: 1px; background: linear-gradient(to right, transparent, var(--accent-border), transparent); margin-bottom: 10px; }
+        .credit-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+        .credit-copy { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; }
+        .credit-github { color: var(--muted); display: flex; align-items: center; transition: color 0.2s, transform 0.2s; }
+        .credit-github:hover { color: var(--accent); transform: scale(1.15); }
+        .credit-by { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 0.5px; line-height: 1.7; }
+        .credit-name { color: var(--accent); text-decoration: none; font-weight: 700; letter-spacing: 0.5px; transition: opacity 0.2s; display: inline-flex; align-items: center; gap: 2px; }
+        .credit-name:hover { opacity: 0.75; text-decoration: underline; text-underline-offset: 3px; }
         .node-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; }
         .node-avatar { width: 28px; height: 28px; background: var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .node-id { font-family: var(--font-mono); font-size: 9px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 140px; }
@@ -235,7 +243,6 @@
                 <div class="logo-icon"><i data-lucide="shield-check"></i></div>
                 <div>
                     <div class="logo-text">SafeShip</div>
-                    <div class="logo-version">NEURAL TRACE v7.0</div>
                 </div>
             </div>
         </div>
@@ -259,11 +266,26 @@
         </div>
 
         <div class="sidebar-footer">
-            <div class="node-card">
+            <div class="node-card" style="margin-bottom:10px">
                 <div class="node-avatar"><i data-lucide="user" style="width:14px;height:14px;color:var(--muted)"></i></div>
                 <div>
                     <div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase">Node ID</div>
                     <div class="node-id" id="userIdText">Connecting...</div>
+                </div>
+            </div>
+            <div class="credit-footer">
+                <div class="credit-divider"></div>
+                <div class="credit-row">
+                    <span class="credit-copy">&copy; 2025 SafeShip</span>
+                    <a href="https://github.com/avirajsalunkhe" target="_blank" rel="noopener" class="credit-github">
+                        <i data-lucide="github" style="width:13px;height:13px"></i>
+                    </a>
+                </div>
+                <div class="credit-by">
+                    Designed &amp; Developed by<br>
+                    <a href="https://github.com/avirajsalunkhe" target="_blank" rel="noopener" class="credit-name">
+                        Aviraj Salunkhe <i data-lucide="arrow-up-right" style="width:10px;height:10px;vertical-align:middle"></i>
+                    </a>
                 </div>
             </div>
         </div>
