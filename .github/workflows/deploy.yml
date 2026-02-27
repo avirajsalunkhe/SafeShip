@@ -5,6 +5,12 @@ on:
     branches:
       - main # Or your default branch
 
+# Added explicit permissions to allow pushing to the gh-pages branch
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -24,9 +30,7 @@ jobs:
           # Note: We use a different delimiter because JSON contains slashes
           sed -i "s|__firebase_config|'${{ secrets.FIREBASE_CONFIG }}'|g" index.html
 
-      - name: Deploy to GitHub Pages (or other provider)
-        # Use your preferred deployment action here
-        # Example for GitHub Pages:
+      - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
