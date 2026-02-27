@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SafeShip | Neural Trace Engine v6.2.2</title>
+    <title>SafeShip | Neural Trace Engine v6.2.3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
@@ -12,7 +12,7 @@
         import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- NEURAL TELEMETRY ---
+        // --- NEURAL TELEMETRY SYSTEM ---
         window.neuralTelemetry = (component, message, data = null) => {
             const time = new Date().toLocaleTimeString();
             console.log(`%c[NEURAL] [${time}] [${component}] %c${message}`, "color: #10b981; font-weight: bold;", "color: #a1a1aa;", data || "");
@@ -32,23 +32,21 @@
             sessionKeys: { gemini: detectGeminiKey(), groq: "__GROQ_API_KEY__" }
         };
 
-        // --- FIREBASE INITIALIZATION ---
+        // --- SECURE HANDSHAKE LOGIC ---
         let firebaseConfig = null;
         const rawInjected = '__FIREBASE_CONFIG_JSON__';
 
         try {
-            // Priority 1: Canvas Environment
             if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                 firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
             } 
-            // Priority 2: GitHub Injected Secret
             else if (rawInjected && !rawInjected.startsWith('__') && rawInjected !== '{}') {
                 firebaseConfig = JSON.parse(rawInjected);
-                neuralTelemetry("Persistence", "GitHub Cloud node linked.");
+                neuralTelemetry("Persistence", "GitHub Cloud node linked successfully.");
             }
         } catch (e) { 
-            neuralTelemetry("Config", "FATAL: Firebase Secret is malformed. Verify JSON in GitHub Secrets.", e);
-            console.error("Raw content attempted:", rawInjected);
+            neuralTelemetry("Config", "FATAL: Firebase Secret is malformed.", e);
+            window.handshakeError = e.message;
         }
 
         if (firebaseConfig && firebaseConfig.apiKey) {
@@ -75,13 +73,22 @@
                 })();
             } catch (e) { neuralTelemetry("Firebase", "Fatal Initialization Error", e); }
         } else {
-            // This is the expected state in the Canvas Preview
-            neuralTelemetry("Persistence", "STANDALONE MODE: Connect to GitHub to enable Cloud History.");
+            neuralTelemetry("Persistence", "STANDALONE MODE ACTIVE: History and Cloud Sync disabled.");
             setTimeout(() => {
                 const sl = document.getElementById('statusLabel');
+                const diag = document.getElementById('diagnosticInfo');
                 if (sl) {
                     sl.innerText = "Persistence Offline";
                     sl.className = "text-[10px] font-black uppercase tracking-widest text-zinc-500";
+                }
+                if (diag) {
+                    diag.innerHTML = `
+                        <div class="p-4 bg-rose-500/5 border border-rose-500/10 rounded-xl mt-4">
+                            <p class="text-[10px] font-black text-rose-500 uppercase mb-1">Handshake Advisory</p>
+                            <p class="text-xs text-zinc-500 leading-tight">Firebase Node is offline. If this is production, verify your <b>FIREBASE_CONFIG</b> secret uses strict JSON (double quotes for all keys).</p>
+                            ${window.handshakeError ? `<p class="text-[10px] font-mono text-rose-400 mt-2">Error: ${window.handshakeError}</p>` : ''}
+                        </div>
+                    `;
                 }
             }, 1000);
         }
@@ -94,7 +101,7 @@
                     .sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
                 window.SAFESHIP_CONTEXT.history = audits;
                 renderHistory();
-            }, (err) => neuralTelemetry("History", "Permission Refused", err));
+            }, (err) => neuralTelemetry("History", "Permission Refused. Check Firestore Rules.", err));
         }
 
         window.saveAuditToCloud = async (auditData) => {
@@ -138,11 +145,12 @@
             <div class="flex-1 overflow-y-auto p-4 space-y-4">
                 <span class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2">History Traces</span>
                 <div id="historyContainer" class="space-y-2"></div>
+                <div id="diagnosticInfo"></div>
             </div>
             <div class="p-4 border-t border-zinc-800/50">
                 <div class="flex items-center gap-3 p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
                     <div class="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center"><i data-lucide="user" class="w-4 h-4 text-zinc-400"></i></div>
-                    <div class="flex flex-col"><span class="text-[10px] text-zinc-500 uppercase font-black">Secure ID</span><span id="userIdText" class="text-[10px] font-mono text-emerald-500 truncate w-32 tracking-tighter italic">Preview Node</span></div>
+                    <div class="flex flex-col"><span class="text-[10px] text-zinc-500 uppercase font-black">Secure ID</span><span id="userIdText" class="text-[10px] font-mono text-emerald-500 truncate w-32 tracking-tighter">Connecting...</span></div>
                 </div>
             </div>
         </aside>
@@ -155,7 +163,7 @@
                 <div class="flex items-center gap-4">
                     <div id="neuralStatus" class="flex items-center gap-2 px-4 py-2 bg-zinc-900 rounded-xl border border-zinc-800">
                         <div id="statusPulse" class="w-2 h-2 rounded-full bg-zinc-700"></div>
-                        <span id="statusLabel" class="text-[10px] font-black uppercase tracking-widest text-zinc-500">Awaiting Signal</span>
+                        <span id="statusLabel" class="text-[10px] font-black uppercase tracking-widest text-zinc-500">Node Standby</span>
                     </div>
                 </div>
             </nav>
@@ -172,14 +180,14 @@
                     <div class="border-2 border-dashed border-zinc-800 rounded-3xl p-12 text-center bg-zinc-900/10 cursor-pointer hover:bg-zinc-900/20 transition-all group" onclick="document.getElementById('fileInput').click()">
                         <input type="file" id="fileInput" multiple class="hidden" onchange="handleFiles(event)">
                         <i data-lucide="upload-cloud" class="w-8 h-8 mx-auto mb-4 text-zinc-700 group-hover:text-emerald-500 transition-colors"></i>
-                        <p class="text-sm font-bold">Upload Source Repository</p>
+                        <p class="text-sm font-bold">Upload Source Traces</p>
                     </div>
                     <div id="fileList" class="flex flex-wrap gap-2"></div>
-                    <button id="codeAuditBtn" onclick="startAudit()" class="w-full bg-white text-black font-black py-4 rounded-2xl disabled:opacity-50" disabled>ANALYZE ARCHITECTURE</button>
+                    <button id="codeAuditBtn" onclick="startAudit()" class="w-full bg-white text-black font-black py-4 rounded-2xl disabled:opacity-50" disabled>ANALYZE LOGIC</button>
                 </div>
                 <div id="resultsArea">
                     <div id="idleState" class="h-[400px] border border-zinc-800/50 rounded-[2.5rem] flex flex-col items-center justify-center bg-black/20 scanline relative overflow-hidden"><i data-lucide="activity" class="w-12 h-12 text-zinc-800 mb-4 animate-pulse"></i><p class="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Awaiting Signal</p></div>
-                    <div id="loadingState" class="hidden h-[400px] flex flex-col items-center justify-center"><p id="loadingPhase" class="text-xs font-mono text-emerald-500 uppercase tracking-widest animate-pulse">Tracing Neural Patterns...</p></div>
+                    <div id="loadingState" class="hidden h-[400px] flex flex-col items-center justify-center"><p id="loadingPhase" class="text-xs font-mono text-emerald-500 uppercase tracking-widest animate-pulse">Syncing Neural Nodes...</p></div>
                     <div id="contentState" class="hidden space-y-8"></div>
                 </div>
             </div>
@@ -216,15 +224,15 @@
             id.classList.add('hidden'); ct.classList.add('hidden'); ld.classList.remove('hidden');
             try {
                 const keys = window.SAFESHIP_CONTEXT.sessionKeys;
-                if (!keys.gemini || keys.gemini.startsWith("__")) throw new Error("Neural Node disconnected. Link your API keys in GitHub Secrets.");
+                if (!keys.gemini || keys.gemini.startsWith("__")) throw new Error("Neural Node disconnected. Deploy to GitHub to link secrets.");
                 let data;
                 if (auditMode === 'url') {
                     const u = document.getElementById('urlInput').value.trim(); if(!u) throw new Error("URL Required");
-                    ph.innerText = "Simulating Scrape..."; neuralTelemetry("Engine", `Starting URL Probe: ${u}`);
+                    ph.innerText = "Tracing Infrastructure..."; neuralTelemetry("Engine", `Starting URL Probe: ${u}`);
                     const sc = await simulateScrape(u);
                     data = await callGemini(`Audit website: ${u}. Context: ${sc}`); data.target = u;
                 } else {
-                    ph.innerText = "Scanning Repository...";
+                    ph.innerText = "Analyzing Repository Architecture...";
                     const code = window.SAFESHIP_CONTEXT.currentFiles.map(f => `File: ${f.name}\n${f.content}`).join('\n\n');
                     data = await callGemini(`SAST Audit: ${code}`); data.target = "Repo Trace";
                 }
@@ -239,7 +247,7 @@
         }
         async function simulateScrape(u) {
             try { const r = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(u)}`); const d = await r.json(); return d.contents.substring(0, 4000); }
-            catch (e) { return "Scrape Data Limited."; }
+            catch (e) { return "Scrape Data Restricted."; }
         }
         async function callGemini(p) {
             const k = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
@@ -277,7 +285,7 @@
         }
         function renderHistory() {
             const h = window.SAFESHIP_CONTEXT.history, c = document.getElementById('historyContainer');
-            if (h.length === 0) { c.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold border border-zinc-900 rounded-xl">No History Found</div>`; return; }
+            if (h.length === 0) { c.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold border border-zinc-900 rounded-xl">No Records Found</div>`; return; }
             c.innerHTML = h.map(i => `
                 <div class="group p-3 bg-zinc-900/30 border border-zinc-800/50 rounded-xl hover:border-emerald-500/50 cursor-pointer transition-all relative">
                     <div onclick='renderResults(${JSON.stringify(i).replace(/'/g, "&apos;")})' class="pr-8">
