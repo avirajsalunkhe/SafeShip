@@ -16,15 +16,19 @@
 
         /**
          * 1. Initialize Global Context IMMEDIATELY
-         * Robust detection for Gemini API Key from multiple sources.
+         * Standard Artifact Pattern: apiKey is provided at runtime by the environment.
          */
+        const apiKey = ""; 
+
         const detectGeminiKey = () => {
-            // Priority 1: Environment variable from Canvas runner
+            // Priority 1: Check the system-provided apiKey variable
             if (typeof apiKey !== 'undefined' && apiKey && apiKey !== "") return apiKey;
             
-            // Priority 2: Injected placeholder from GitHub Actions
-            const injected = "__GEMINI_API_KEY__";
-            if (injected && !injected.startsWith("__") && injected !== "") return injected;
+            // Priority 2: Check for GitHub Secret injection placeholder
+            const githubInjected = "__GEMINI_API_KEY__";
+            if (githubInjected && !githubInjected.startsWith("__") && githubInjected !== "") {
+                return githubInjected;
+            }
             
             return ""; 
         };
@@ -44,7 +48,7 @@
 
         /**
          * SECURE CONFIGURATION BLOCK
-         * Improved resilience for Firebase Config injection.
+         * Improved resilience for Firebase Config detection in both Canvas and GitHub.
          */
         let firebaseConfig = null;
         try {
@@ -57,14 +61,14 @@
             if (!firebaseConfig || !firebaseConfig.apiKey) {
                 const rawInjected = '__FIREBASE_CONFIG_JSON__';
                 if (rawInjected && !rawInjected.startsWith('__')) {
-                    firebaseConfig = JSON.parse(rawInjected);
+                    firebaseConfig = typeof rawInjected === 'string' ? JSON.parse(rawInjected) : rawInjected;
                 }
             }
         } catch (e) {
-            console.error("SafeShip Config: Failed to parse Firebase Secret.", e);
+            console.error("SafeShip Config: Neural Node failed to handshake with Firebase.", e);
         }
 
-        // 2. Conditional Initialization
+        // 2. Conditional Initialization: Guarding against empty config
         if (firebaseConfig && firebaseConfig.apiKey) {
             try {
                 const app = initializeApp(firebaseConfig);
@@ -101,25 +105,26 @@
                 console.error("SafeShip Firebase: Service Initialization Error.", e);
             }
         } else {
-            console.warn("SafeShip: Neural Persistence node is offline (Missing Config). Check GitHub FIREBASE_CONFIG secret.");
-            // UI Fallback
+            console.warn("SafeShip: Neural Persistence node is offline (Missing Config).");
+            // Soft failure UI update
             setTimeout(() => {
                 const statusLabel = document.getElementById('statusLabel');
                 const historyCont = document.getElementById('historyContainer');
-                if (statusLabel && statusLabel.innerText === "Awaiting Secrets") {
+                if (statusLabel && statusLabel.innerText.includes("Awaiting")) {
                     statusLabel.innerText = "Persistence Offline";
                     statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-zinc-600";
                 }
-                if (historyCont) {
-                    historyCont.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold border border-zinc-900 rounded-xl">Local Mode Active</div>`;
+                if (historyCont && historyCont.innerText.includes("Awaiting")) {
+                    historyCont.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold border border-zinc-900 rounded-xl">Local Session Mode</div>`;
                 }
-            }, 500);
+            }, 800);
         }
 
         function loadHistory(userId) {
             const { db, appId } = window.SAFESHIP_CONTEXT;
             if (!db) return;
 
+            // Follow Rule 1: Strict Paths for Firestore
             const historyPath = collection(db, 'artifacts', appId, 'users', userId, 'audits');
             onSnapshot(historyPath, (snapshot) => {
                 const audits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
@@ -127,7 +132,7 @@
                 window.SAFESHIP_CONTEXT.history = audits;
                 renderHistory();
             }, (err) => {
-                console.error("SafeShip History: Stream Error.", err);
+                console.error("SafeShip History: Real-time stream failed.", err);
             });
         }
 
@@ -141,7 +146,7 @@
                     timestamp: serverTimestamp()
                 });
             } catch (e) {
-                console.error("SafeShip Cloud: Data Save Failed.", e);
+                console.error("SafeShip Cloud: Audit save failed.", e);
             }
         };
     </script>
@@ -318,7 +323,7 @@
             const statusPulse = document.getElementById('statusPulse');
             const statusLabel = document.getElementById('statusLabel');
             
-            // Check if Gemini key is present and NOT a placeholder
+            // A key is linked if it is not the placeholder __ string
             const isGeminiLinked = keys.gemini && keys.gemini !== "" && !keys.gemini.startsWith("__");
 
             if (isGeminiLinked) {
@@ -328,7 +333,7 @@
                 console.log("SafeShip Node: Neural Link Established.");
             } else {
                 statusPulse.className = "w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]";
-                statusLabel.innerText = "Neural Offline";
+                statusLabel.innerText = "Neural Link Failed";
                 statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-rose-500";
                 console.warn("SafeShip Node: Neural Link Failed. Missing or rejected API Key.");
             }
@@ -387,7 +392,7 @@
             try {
                 const keys = window.SAFESHIP_CONTEXT.sessionKeys;
                 if (!keys.gemini || keys.gemini === "" || keys.gemini.startsWith("__")) 
-                    throw new Error("Neural Nodes Inactive: Ensure your Gemini API Key is set correctly in GitHub Secrets.");
+                    throw new Error("Neural Nodes Inactive: Ensure your Gemini API Key is set correctly in GitHub Secrets or the environment.");
 
                 let reportData;
                 if (auditMode === 'url') {
@@ -406,6 +411,7 @@
                     reportData.target = "Repository Trace";
                 }
 
+                // Follow Rule 1: Public/Private structure is handled via appId and userId logic inside the helper
                 await window.saveAuditToCloud(reportData);
                 renderResults(reportData);
             } catch (err) {
