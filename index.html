@@ -126,6 +126,12 @@
         .glow-text {
             text-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
         }
+
+        @keyframes pulse-link {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.95); }
+        }
+        .animate-link { animation: pulse-link 2s infinite ease-in-out; }
     </style>
 </head>
 <body class="selection:bg-emerald-500/30">
@@ -182,9 +188,10 @@
                     <button onclick="setMode('code')" id="modeTab-code" class="text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-200 h-16 transition-all">SAST Multi-File</button>
                 </div>
                 <div class="flex items-center gap-4">
-                    <button onclick="toggleModal('settingsModal', true)" class="p-2 hover:bg-zinc-900 rounded-lg text-zinc-400">
-                        <i data-lucide="settings-2" class="w-5 h-5"></i>
-                    </button>
+                    <div id="neuralStatus" class="flex items-center gap-2 px-4 py-2 bg-zinc-900 rounded-xl border border-zinc-800 transition-all">
+                        <div id="statusPulse" class="w-2 h-2 rounded-full bg-zinc-700"></div>
+                        <span id="statusLabel" class="text-[10px] font-black uppercase tracking-widest text-zinc-500">Awaiting Secrets</span>
+                    </div>
                 </div>
             </nav>
 
@@ -263,30 +270,32 @@
         </main>
     </div>
 
-    <!-- Modals -->
-    <div id="settingsModal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-6">
-        <div class="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-[2.5rem] p-8 space-y-6">
-            <div class="flex justify-between items-center">
-                <h3 class="text-xl font-bold uppercase tracking-tight">Neural Config</h3>
-                <button onclick="toggleModal('settingsModal', false)" class="text-zinc-500 hover:text-white"><i data-lucide="x"></i></button>
-            </div>
-            <div class="space-y-4">
-                <div class="space-y-2">
-                    <label class="text-[10px] font-black text-zinc-500 uppercase">Gemini API Key</label>
-                    <input type="password" id="geminiKey" class="w-full bg-black border border-zinc-800 rounded-xl px-4 py-3 text-xs font-mono text-emerald-500">
-                </div>
-                <div class="space-y-2">
-                    <label class="text-[10px] font-black text-zinc-500 uppercase">Groq Handover Key</label>
-                    <input type="password" id="groqKey" class="w-full bg-black border border-zinc-800 rounded-xl px-4 py-3 text-xs font-mono text-blue-500">
-                </div>
-            </div>
-            <button onclick="saveSettings()" class="w-full bg-emerald-500 text-black py-3 rounded-xl font-bold">SYNC NODES</button>
-        </div>
-    </div>
-
     <script>
         let auditMode = 'url';
         const APP_VERSION = "6.0.4";
+
+        // AUTO-CONFIGURATION LOGIC
+        function autoConfigureNeuralNodes() {
+            const keys = window.SAFESHIP_CONTEXT.sessionKeys;
+            const statusPulse = document.getElementById('statusPulse');
+            const statusLabel = document.getElementById('statusLabel');
+            
+            // Check if keys were injected (placeholders starting with __ are considered empty)
+            const isGeminiLinked = keys.gemini && !keys.gemini.startsWith("__");
+            const isGroqLinked = keys.groq && !keys.groq.startsWith("__");
+
+            if (isGeminiLinked) {
+                statusPulse.className = "w-2 h-2 rounded-full bg-emerald-500 animate-link shadow-[0_0_8px_rgba(16,185,129,0.5)]";
+                statusLabel.innerText = "Neural Linked";
+                statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-emerald-500";
+                console.log("[SafeShip] Auto-Handshake Complete: Neural Nodes active.");
+            } else {
+                statusPulse.className = "w-2 h-2 rounded-full bg-rose-500";
+                statusLabel.innerText = "Secret Injection Error";
+                statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-rose-500";
+                console.warn("[SafeShip] Critical: GitHub Secrets not detected in runtime context.");
+            }
+        }
 
         function setMode(mode) {
             auditMode = mode;
@@ -299,18 +308,6 @@
                     ? "text-xs font-black uppercase tracking-widest text-emerald-500 border-b-2 border-emerald-500 h-16 transition-all"
                     : "text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-200 h-16 transition-all";
             });
-        }
-
-        function toggleModal(id, show) {
-            document.getElementById(id).classList.toggle('hidden', !show);
-        }
-
-        function saveSettings() {
-            const g = document.getElementById('geminiKey').value.trim();
-            const gr = document.getElementById('groqKey').value.trim();
-            if(g) window.SAFESHIP_CONTEXT.sessionKeys.gemini = g;
-            if(gr) window.SAFESHIP_CONTEXT.sessionKeys.groq = gr;
-            toggleModal('settingsModal', false);
         }
 
         function updateUIForUser(user) {
@@ -391,11 +388,10 @@
 
         async function simulateScrape(url) {
             try {
-                // Using a proxy to bypass CORS for basic metadata
                 const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
                 const response = await fetch(proxyUrl);
                 const data = await response.json();
-                return data.contents.substring(0, 5000); // Send first 5k chars to LLM
+                return data.contents.substring(0, 5000); 
             } catch (e) {
                 return "CORS/Access Restriction: Scrape limited to DNS and Public Search Data.";
             }
@@ -403,7 +399,7 @@
 
         async function callGemini(prompt) {
             const key = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
-            if (key.startsWith("__")) throw new Error("API Key configuration required in settings.");
+            if (key.startsWith("__")) throw new Error("CRITICAL: GitHub Secrets are not linked. Check environment configuration.");
 
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`;
             const payload = {
@@ -520,6 +516,7 @@
         window.onload = () => {
             lucide.createIcons();
             setMode('url');
+            autoConfigureNeuralNodes();
         };
     </script>
 </body>
