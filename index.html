@@ -18,12 +18,14 @@
             console.log(`%c[NEURAL] [${time}] [${component}] %c${message}`, "color: #10b981; font-weight: bold;", "color: #a1a1aa;", data || "");
         };
 
-        // Key resolution priority: 1. Injected Secret 2. App Environment
-        const getSecret = (placeholder) => {
-            if (placeholder && !placeholder.startsWith("__") && placeholder !== "" && placeholder !== "{}") return placeholder;
+        // Resolution: Priority 1: Global Env variable (Canvas) | Priority 2: Injected Placeholder (GitHub)
+        const resolveSecret = (injected, envVar) => {
+            if (envVar && envVar !== "") return envVar;
+            if (injected && !injected.startsWith("__") && injected !== "" && injected !== "{}") return injected;
             return null;
         };
 
+        const currentGeminiKey = resolveSecret("AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA", typeof apiKey !== 'undefined' ? apiKey : "");
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'safeship-trace-v6';
 
         window.SAFESHIP_CONTEXT = {
@@ -31,8 +33,8 @@
             appId: appId,
             user: null, history: [], currentFiles: [],
             sessionKeys: { 
-                gemini: getSecret("AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA"), 
-                groq: getSecret("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") 
+                gemini: currentGeminiKey,
+                groq: resolveSecret("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", null)
             }
         };
 
@@ -53,15 +55,13 @@
                 // Priority 1: Environment provided config (Canvas/Preview)
                 if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                     config = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
-                    neuralTelemetry("Handshake", "Using environment configuration.");
                 } 
                 // Priority 2: GitHub Action injected secret
-                else if (getSecret(injectedConfig)) {
+                else if (resolveSecret(injectedConfig, null)) {
                     config = JSON.parse(injectedConfig);
-                    neuralTelemetry("Handshake", "Using injected GitHub secret.");
                 }
             } catch (e) {
-                neuralTelemetry("Handshake", "FATAL: Configuration parsing failed.", e);
+                neuralTelemetry("Handshake", "Configuration parsing failed.", e);
             }
 
             if (config && config.apiKey) {
@@ -73,19 +73,7 @@
                     window.SAFESHIP_CONTEXT.auth = auth;
                     window.SAFESHIP_CONTEXT.db = db;
 
-                    // Authentication Step (Mandatory before Firestore access)
-                    const performAuth = async () => {
-                        try {
-                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                                await signInWithCustomToken(auth, __initial_auth_token);
-                            } else { 
-                                await signInAnonymously(auth); 
-                            }
-                        } catch (authErr) {
-                            neuralTelemetry("Auth", "Authentication handshake failed.", authErr);
-                        }
-                    };
-
+                    // Auth handler
                     onAuthStateChanged(auth, (user) => {
                         window.SAFESHIP_CONTEXT.user = user;
                         const uidEl = document.getElementById('userIdText');
@@ -95,28 +83,24 @@
                             updateStatusUI("Cloud Linked", "text-emerald-500");
                             loadHistory(user.uid);
                         } else {
-                            updateStatusUI("Auth Pending", "text-zinc-500");
+                            updateStatusUI("Connecting...", "text-zinc-500");
                         }
                     });
                     
-                    await performAuth();
-                    neuralTelemetry("Persistence", "Cloud Uplink Established.");
+                    // Trigger Auth
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else { 
+                        await signInAnonymously(auth); 
+                    }
+                    neuralTelemetry("Persistence", "Uplink Established.");
                 } catch (e) {
-                    neuralTelemetry("Firebase", "Internal Node Error", e);
-                    updateStatusUI("Node Error", "text-rose-500");
+                    neuralTelemetry("Firebase", "Initialization Error", e);
+                    updateStatusUI("Offline", "text-rose-500");
                 }
             } else {
-                neuralTelemetry("Persistence", "STANDALONE MODE: Persistence offline.");
+                neuralTelemetry("Persistence", "STANDALONE MODE: Using local session only.");
                 updateStatusUI("Offline", "text-zinc-500");
-                // Visual advisory for the user
-                const diag = document.getElementById('idleState');
-                if (diag) {
-                    diag.innerHTML += `
-                        <div class="absolute bottom-8 px-6 py-2 bg-rose-500/10 border border-rose-500/20 rounded-full">
-                            <p class="text-[9px] font-black text-rose-500 uppercase tracking-widest">Persistence Secret Missing</p>
-                        </div>
-                    `;
-                }
             }
         };
 
@@ -130,7 +114,7 @@
             if (sp) {
                 if (label.includes("Linked")) {
                     sp.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
-                } else if (label.includes("Offline") || label.includes("Error")) {
+                } else if (label.includes("Offline")) {
                     sp.className = "w-2 h-2 rounded-full bg-rose-500";
                 } else {
                     sp.className = "w-2 h-2 rounded-full bg-zinc-700";
@@ -141,15 +125,13 @@
         function loadHistory(userId) {
             const { db, appId } = window.SAFESHIP_CONTEXT;
             if (!db) return;
-            // Guard: Must have user to query private data
             onSnapshot(collection(db, 'artifacts', appId, 'users', userId, 'audits'), (snap) => {
                 const audits = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
                     .sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
                 window.SAFESHIP_CONTEXT.history = audits;
                 renderHistory();
             }, (err) => {
-                neuralTelemetry("History", "Permission Refused. Verify Firestore Rules.", err);
-                updateStatusUI("Sync Blocked", "text-rose-400");
+                neuralTelemetry("History", "Access restricted.", err);
             });
         }
 
@@ -160,14 +142,14 @@
                 await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'audits'), {
                     ...auditData, timestamp: serverTimestamp()
                 });
-            } catch(e) { neuralTelemetry("Storage", "Write Access Denied", e); }
+            } catch(e) { console.error("Save error", e); }
         };
 
         window.deleteAudit = async (auditId) => {
             const { db, user, appId } = window.SAFESHIP_CONTEXT;
             if (!db || !user) return;
             try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'audits', auditId)); } 
-            catch (e) { neuralTelemetry("Storage", "Delete Access Denied", e); }
+            catch (e) { console.error("Delete error", e); }
         };
 
         window.onload = () => {
@@ -181,7 +163,7 @@
             if (hasGemini) {
                 neuralTelemetry("Engine", "Neural Core Handshake Success.");
             } else {
-                neuralTelemetry("Engine", "WARNING: GEMINI_API_KEY missing.");
+                neuralTelemetry("Engine", "CRITICAL: Gemini Key missing from environment.");
             }
         }
     </script>
