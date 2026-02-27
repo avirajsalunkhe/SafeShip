@@ -20,13 +20,15 @@
 
         // Key resolution priority: 1. Injected Secret 2. App Environment
         const getSecret = (placeholder) => {
-            if (placeholder && !placeholder.startsWith("__") && placeholder !== "") return placeholder;
+            if (placeholder && !placeholder.startsWith("__") && placeholder !== "" && placeholder !== "{}") return placeholder;
             return null;
         };
 
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'safeship-trace-v6';
+
         window.SAFESHIP_CONTEXT = {
             db: null, auth: null,
-            appId: typeof __app_id !== 'undefined' ? __app_id : 'safeship-trace-v6',
+            appId: appId,
             user: null, history: [], currentFiles: [],
             sessionKeys: { 
                 gemini: getSecret("AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA"), 
@@ -48,13 +50,18 @@
 }';
 
             try {
+                // Priority 1: Environment provided config (Canvas/Preview)
                 if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                     config = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
-                } else if (getSecret(injectedConfig)) {
+                    neuralTelemetry("Handshake", "Using environment configuration.");
+                } 
+                // Priority 2: GitHub Action injected secret
+                else if (getSecret(injectedConfig)) {
                     config = JSON.parse(injectedConfig);
+                    neuralTelemetry("Handshake", "Using injected GitHub secret.");
                 }
             } catch (e) {
-                neuralTelemetry("Handshake", "Config Parse Error", e);
+                neuralTelemetry("Handshake", "FATAL: Configuration parsing failed.", e);
             }
 
             if (config && config.apiKey) {
@@ -62,48 +69,88 @@
                     const app = initializeApp(config);
                     const auth = getAuth(app);
                     const db = getFirestore(app);
+                    
                     window.SAFESHIP_CONTEXT.auth = auth;
                     window.SAFESHIP_CONTEXT.db = db;
+
+                    // Authentication Step (Mandatory before Firestore access)
+                    const performAuth = async () => {
+                        try {
+                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                                await signInWithCustomToken(auth, __initial_auth_token);
+                            } else { 
+                                await signInAnonymously(auth); 
+                            }
+                        } catch (authErr) {
+                            neuralTelemetry("Auth", "Authentication handshake failed.", authErr);
+                        }
+                    };
 
                     onAuthStateChanged(auth, (user) => {
                         window.SAFESHIP_CONTEXT.user = user;
                         const uidEl = document.getElementById('userIdText');
                         if (uidEl) uidEl.innerText = user ? user.uid : "Disconnected";
-                        if (user) loadHistory(user.uid);
+                        
+                        if (user) {
+                            updateStatusUI("Cloud Linked", "text-emerald-500");
+                            loadHistory(user.uid);
+                        } else {
+                            updateStatusUI("Auth Pending", "text-zinc-500");
+                        }
                     });
                     
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await signInWithCustomToken(auth, __initial_auth_token);
-                    } else { 
-                        await signInAnonymously(auth); 
-                    }
+                    await performAuth();
                     neuralTelemetry("Persistence", "Cloud Uplink Established.");
                 } catch (e) {
-                    neuralTelemetry("Firebase", "Initialization Failed", e);
+                    neuralTelemetry("Firebase", "Internal Node Error", e);
+                    updateStatusUI("Node Error", "text-rose-500");
                 }
             } else {
-                neuralTelemetry("Persistence", "Offline Mode: Secret Injection Required.");
+                neuralTelemetry("Persistence", "STANDALONE MODE: Persistence offline.");
                 updateStatusUI("Offline", "text-zinc-500");
+                // Visual advisory for the user
+                const diag = document.getElementById('idleState');
+                if (diag) {
+                    diag.innerHTML += `
+                        <div class="absolute bottom-8 px-6 py-2 bg-rose-500/10 border border-rose-500/20 rounded-full">
+                            <p class="text-[9px] font-black text-rose-500 uppercase tracking-widest">Persistence Secret Missing</p>
+                        </div>
+                    `;
+                }
             }
         };
 
         function updateStatusUI(label, colorClass) {
             const sl = document.getElementById('statusLabel');
+            const sp = document.getElementById('statusPulse');
             if (sl) {
                 sl.innerText = label;
                 sl.className = `text-[10px] font-black uppercase tracking-widest ${colorClass}`;
+            }
+            if (sp) {
+                if (label.includes("Linked")) {
+                    sp.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+                } else if (label.includes("Offline") || label.includes("Error")) {
+                    sp.className = "w-2 h-2 rounded-full bg-rose-500";
+                } else {
+                    sp.className = "w-2 h-2 rounded-full bg-zinc-700";
+                }
             }
         }
 
         function loadHistory(userId) {
             const { db, appId } = window.SAFESHIP_CONTEXT;
             if (!db) return;
+            // Guard: Must have user to query private data
             onSnapshot(collection(db, 'artifacts', appId, 'users', userId, 'audits'), (snap) => {
                 const audits = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
                     .sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
                 window.SAFESHIP_CONTEXT.history = audits;
                 renderHistory();
-            }, (err) => neuralTelemetry("History", "Permission Error", err));
+            }, (err) => {
+                neuralTelemetry("History", "Permission Refused. Verify Firestore Rules.", err);
+                updateStatusUI("Sync Blocked", "text-rose-400");
+            });
         }
 
         window.saveAuditToCloud = async (auditData) => {
@@ -113,14 +160,14 @@
                 await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'audits'), {
                     ...auditData, timestamp: serverTimestamp()
                 });
-            } catch(e) { neuralTelemetry("Storage", "Save Failed", e); }
+            } catch(e) { neuralTelemetry("Storage", "Write Access Denied", e); }
         };
 
         window.deleteAudit = async (auditId) => {
             const { db, user, appId } = window.SAFESHIP_CONTEXT;
             if (!db || !user) return;
             try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'audits', auditId)); } 
-            catch (e) { neuralTelemetry("Storage", "Delete Failed", e); }
+            catch (e) { neuralTelemetry("Storage", "Delete Access Denied", e); }
         };
 
         window.onload = () => {
@@ -131,12 +178,10 @@
 
         function autoConfigureNodes() {
             const hasGemini = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
-            const sp = document.getElementById('statusPulse');
-            const sl = document.getElementById('statusLabel');
             if (hasGemini) {
-                sp.classList.add('bg-emerald-500', 'animate-pulse');
-                sl.innerText = "Neural Linked";
-                sl.classList.add('text-emerald-500');
+                neuralTelemetry("Engine", "Neural Core Handshake Success.");
+            } else {
+                neuralTelemetry("Engine", "WARNING: GEMINI_API_KEY missing.");
             }
         }
     </script>
@@ -249,7 +294,7 @@
             
             try {
                 const key = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
-                if (!key) throw new Error("Neural node missing. Ensure GEMINI_API_KEY is in GitHub Secrets.");
+                if (!key) throw new Error("Neural core is offline. Verify GEMINI_API_KEY in repository secrets.");
                 
                 let targetLabel, payload;
                 if (auditMode === 'url') {
@@ -282,7 +327,7 @@
                 generationConfig: { responseMimeType: "application/json" }
             };
             const r = await fetch(url, { method: 'POST', body: JSON.stringify(body) });
-            if (!r.ok) throw new Error(`Node Refused Connection (HTTP ${r.status})`);
+            if (!r.ok) throw new Error(`Neural Node Refused Connection (HTTP ${r.status})`);
             const res = await r.json();
             return JSON.parse(res.candidates[0].content.parts[0].text);
         }
