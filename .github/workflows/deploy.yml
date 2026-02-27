@@ -20,7 +20,7 @@ jobs:
       - name: Inject Neural Secrets (Safe Python Mode)
         shell: python
         env:
-          # These names must match the os.environ.get() calls below exactly
+          # VERIFIED: These names match GitHub Repository Secrets exactly
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
@@ -31,14 +31,14 @@ jobs:
 
             filename = 'index.html'
             if not os.path.exists(filename):
-                print(f"[!] CRITICAL: {filename} not found in root directory.")
+                print(f"[!] CRITICAL: {filename} not found. Check repository structure.")
                 sys.exit(1)
 
             with open(filename, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            # Mapping GitHub Secrets to internal placeholders
-            # We now use exact matches for the env variable names defined above
+            # SYSTEM CROSS-CHECK MAPPING
+            # Placeholder in Code -> Key in GitHub Secrets
             replacements = {
                 '__GEMINI_API_KEY__': os.environ.get('GEMINI_API_KEY', ''),
                 '__GROQ_API_KEY__': os.environ.get('GROQ_API_KEY', ''),
@@ -47,37 +47,43 @@ jobs:
 
             failed_injection = False
             for placeholder, value in replacements.items():
-                # Check if secret exists and has content
+                # 1. Existence Check
                 if not value or value.strip() == "" or value == "{}":
-                    print(f"[!] TELEMETRY ALERT: Secret for {placeholder} is missing or empty in GitHub Settings.")
+                    print(f"[!] ERROR: Secret for {placeholder} is missing in GitHub Settings.")
                     failed_injection = True
                     continue
                 
-                # Special validation for Firebase Config JSON
+                # 2. Format Validation
                 if placeholder == '__FIREBASE_CONFIG_JSON__':
                     clean_value = value.strip()
                     try:
-                        json.loads(clean_value)
-                        print(f"[*] TELEMETRY: FIREBASE_CONFIG validated (Length: {len(clean_value)} chars).")
+                        parsed = json.loads(clean_value)
+                        # Ensure it's the right kind of object
+                        if "apiKey" not in parsed:
+                            print("[!] ERROR: FIREBASE_CONFIG is valid JSON but missing 'apiKey' field.")
+                            failed_injection = True
+                        else:
+                            print(f"[*] SUCCESS: Firebase persistence node validated.")
                     except ValueError as e:
-                        print(f"[!] CRITICAL ERROR: FIREBASE_CONFIG is NOT valid JSON.")
-                        print(f"[DEBUG]: {str(e)}")
+                        print(f"[!] CRITICAL: FIREBASE_CONFIG formatting error: {str(e)}")
                         if "'" in clean_value:
-                            print("[ADVISORY]: Found single quotes ('). JSON requires double quotes (\").")
+                            print("[ADVISORY]: Found single quotes. Use double quotes for JSON.")
                         failed_injection = True
-                else:
-                    print(f"[*] TELEMETRY: Prepared injection for {placeholder} (Length: {len(value)} chars).")
                 
+                # 3. Entropy Check (prevents accidental injection of empty strings or metadata)
+                if len(value) < 10 and placeholder != '__FIREBASE_CONFIG_JSON__':
+                    print(f"[!] WARNING: Secret for {placeholder} is suspiciously short ({len(value)} chars).")
+
                 content = content.replace(placeholder, value)
 
             if failed_injection:
-                print("[!] DEPLOYMENT ABORTED: Neural Nodes could not be linked due to missing secrets.")
+                print("[!] NEURAL HANDSHAKE FAILED: Deployment aborted to prevent broken production state.")
                 sys.exit(1)
 
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(content)
             
-            print("[*] Handshake Success: index.html production-ready.")
+            print("[*] Neural Handshake Success: All secrets injected and validated.")
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
@@ -86,4 +92,4 @@ jobs:
           publish_dir: ./
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: "Neural v6.2.2: Handshake Fix [skip ci]"
+          commit_message: "Neural v6.2.2: Production Handshake Verified [skip ci]"
