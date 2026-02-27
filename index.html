@@ -12,10 +12,16 @@
         import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // 1. Initialize Global Context IMMEDIATELY to prevent "undefined" errors
-        // We try to grab the environment's apiKey if the placeholder hasn't been replaced by GitHub Actions.
-        const runtimeApiKey = (typeof apiKey !== 'undefined' && apiKey) ? apiKey : "__GEMINI_API_KEY__";
-        
+        /**
+         * 1. Initialize Global Context IMMEDIATELY
+         * We prioritize environment-provided keys (Canvas Preview) 
+         * then fall back to GitHub injected placeholders.
+         */
+        const detectGeminiKey = () => {
+            if (typeof apiKey !== 'undefined' && apiKey && apiKey !== "") return apiKey;
+            return "__GEMINI_API_KEY__";
+        };
+
         window.SAFESHIP_CONTEXT = {
             db: null,
             auth: null,
@@ -24,7 +30,7 @@
             history: [],
             currentFiles: [],
             sessionKeys: {
-                gemini: runtimeApiKey,
+                gemini: detectGeminiKey(),
                 groq: "__GROQ_API_KEY__"
             }
         };
@@ -44,11 +50,12 @@
             if (!firebaseConfig || !firebaseConfig.apiKey) {
                 const rawInjected = '__FIREBASE_CONFIG_JSON__';
                 if (rawInjected && !rawInjected.startsWith('__')) {
-                    firebaseConfig = JSON.parse(rawInjected);
+                    // Handle potential nested stringification from some CI/CD tools
+                    firebaseConfig = typeof rawInjected === 'string' ? JSON.parse(rawInjected) : rawInjected;
                 }
             }
         } catch (e) {
-            console.error("Neural Config Parse Error:", e);
+            console.error("Neural Config Parse Error: Verify FIREBASE_CONFIG secret format.", e);
         }
 
         // 2. Conditional Initialization: Only init Firebase if config is valid
@@ -89,14 +96,18 @@
             }
         } else {
             console.warn("SafeShip: Neural Persistence node is offline (Missing Config).");
-            // Ensure UI shows offline status
+            // Visual Update for Offline Persistence
             setTimeout(() => {
                 const statusLabel = document.getElementById('statusLabel');
+                const historyCont = document.getElementById('historyContainer');
                 if (statusLabel) {
                     statusLabel.innerText = "Persistence Offline";
                     statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-zinc-600";
                 }
-            }, 100);
+                if (historyCont) {
+                    historyCont.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold border border-zinc-900 rounded-xl">Cloud Storage Disabled</div>`;
+                }
+            }, 200);
         }
 
         function loadHistory(userId) {
@@ -109,17 +120,23 @@
                     .sort((a, b) => b.timestamp?.seconds - a.timestamp?.seconds);
                 window.SAFESHIP_CONTEXT.history = audits;
                 renderHistory();
-            }, (err) => console.error("Trace Stream Error:", err));
+            }, (err) => {
+                console.error("Trace Stream Error: Check Firestore Rules.", err);
+            });
         }
 
         window.saveAuditToCloud = async (auditData) => {
             const { db, user, appId } = window.SAFESHIP_CONTEXT;
             if (!db || !user) return;
             
-            await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'audits'), {
-                ...auditData,
-                timestamp: serverTimestamp()
-            });
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'audits'), {
+                    ...auditData,
+                    timestamp: serverTimestamp()
+                });
+            } catch (e) {
+                console.error("Cloud Save Failure:", e);
+            }
         };
     </script>
 
@@ -190,7 +207,7 @@
                     <i data-lucide="database" class="w-3 h-3 text-zinc-600"></i>
                 </div>
                 <div id="historyContainer" class="space-y-2">
-                    <div class="p-4 text-center text-zinc-600 text-xs italic">No History Connection</div>
+                    <div class="p-4 text-center text-zinc-600 text-xs italic">Awaiting Sync...</div>
                 </div>
             </div>
 
@@ -289,17 +306,13 @@
         let auditMode = 'url';
 
         function autoConfigureNeuralNodes() {
-            // Check if context and sessionKeys exist defensively
-            if (!window.SAFESHIP_CONTEXT || !window.SAFESHIP_CONTEXT.sessionKeys) {
-                console.error("Neural Node Failure: SAFESHIP_CONTEXT not initialized.");
-                return;
-            }
+            if (!window.SAFESHIP_CONTEXT || !window.SAFESHIP_CONTEXT.sessionKeys) return;
 
             const keys = window.SAFESHIP_CONTEXT.sessionKeys;
             const statusPulse = document.getElementById('statusPulse');
             const statusLabel = document.getElementById('statusLabel');
             
-            // A key is linked if it's not the placeholder __ string
+            // Check if keys were successfully linked (not placeholders)
             const isGeminiLinked = keys.gemini && !keys.gemini.startsWith("__");
 
             if (isGeminiLinked) {
@@ -308,7 +321,7 @@
                 statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-emerald-500";
             } else {
                 statusPulse.className = "w-2 h-2 rounded-full bg-rose-500";
-                statusLabel.innerText = "Secret Rejection Error";
+                statusLabel.innerText = "Neural Offline";
                 statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-rose-500";
             }
         }
@@ -364,8 +377,9 @@
             if (loading) loading.classList.remove('hidden');
 
             try {
-                if (window.SAFESHIP_CONTEXT.sessionKeys.gemini.startsWith("__")) 
-                    throw new Error("Neural Nodes inactive. Verify GitHub Secrets or Environment Variables.");
+                const keys = window.SAFESHIP_CONTEXT.sessionKeys;
+                if (!keys.gemini || keys.gemini.startsWith("__")) 
+                    throw new Error("Neural Nodes Inactive: Ensure your Gemini API Key is set correctly in GitHub Secrets.");
 
                 let reportData;
                 if (auditMode === 'url') {
@@ -375,13 +389,13 @@
                     if (phase) phase.innerText = "Tracing Infrastructure...";
                     const scrapedData = await simulateScrape(url);
                     if (phase) phase.innerText = "Neural Mapping...";
-                    reportData = await callGemini(`Audit website: ${url}. Scrape: ${scrapedData}`);
+                    reportData = await callGemini(`Audit website: ${url}. Scrape Context: ${scrapedData}`);
                     reportData.target = url;
                 } else {
                     if (phase) phase.innerText = "Tracing Logical Debt...";
                     const aggregatedCode = window.SAFESHIP_CONTEXT.currentFiles.map(f => `File: ${f.name}\n${f.content}`).join('\n\n');
-                    reportData = await callGemini(`SAST Audit: ${aggregatedCode}`);
-                    reportData.target = "Repo Trace";
+                    reportData = await callGemini(`Deep SAST Audit on Codebase: ${aggregatedCode}`);
+                    reportData.target = "Repository Trace";
                 }
 
                 await window.saveAuditToCloud(reportData);
@@ -399,7 +413,7 @@
                 const response = await fetch(proxyUrl);
                 const data = await response.json();
                 return data.contents.substring(0, 4000); 
-            } catch (e) { return "Scrape Restricted."; }
+            } catch (e) { return "Live Scraping Restricted by CORS/Security Policy."; }
         }
 
         async function callGemini(prompt) {
@@ -434,6 +448,7 @@
             const response = await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
             const data = await response.json();
             if (data.error) throw new Error(data.error.message);
+            if (!data.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("Neural Engine failed to generate response parts.");
             return JSON.parse(data.candidates[0].content.parts[0].text);
         }
 
@@ -449,12 +464,12 @@
                         <span class="text-[10px] font-black uppercase text-zinc-500 tracking-[0.3em]">Trace Verdict</span>
                         <h3 class="text-6xl font-bold tracking-tighter">${data.score}%</h3>
                     </div>
-                    <button onclick="exportJSON(${JSON.stringify(data).replace(/"/g, '&quot;')})" class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-400 hover:text-emerald-500"><i data-lucide="download"></i></button>
+                    <button onclick="exportJSON(${JSON.stringify(data).replace(/"/g, '&quot;')})" class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-400 hover:text-emerald-500 transition-colors"><i data-lucide="download"></i></button>
                 </div>
-                <div class="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-[2rem] text-sm text-zinc-400">${data.summary}</div>
+                <div class="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-[2rem] text-sm text-zinc-400 leading-relaxed">${data.summary}</div>
                 <div class="space-y-4">
                     ${data.findings.map(f => `
-                        <div class="bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6">
+                        <div class="bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6 group transition-all hover:border-zinc-700">
                             <h4 class="font-bold text-white mb-2">${f.title}</h4>
                             <p class="text-xs text-zinc-500 font-mono mb-2">${f.location}</p>
                             <p class="text-sm text-zinc-400 mb-4">${f.description}</p>
@@ -474,7 +489,7 @@
             if (!container) return;
             const history = window.SAFESHIP_CONTEXT.history;
             if (history.length === 0) {
-                container.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold">No Records Found</div>`;
+                container.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold border border-zinc-900 rounded-xl">No Records Found</div>`;
                 return;
             }
             container.innerHTML = history.map(h => `
@@ -492,7 +507,7 @@
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url; a.download = `report-${Date.now()}.json`; a.click();
+            a.href = url; a.download = `safeship-report-${Date.now()}.json`; a.click();
         }
 
         window.onload = () => { 
