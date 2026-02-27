@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SafeShip | Neural Trace Engine v6.2.1</title>
+    <title>SafeShip | Neural Trace Engine v6.2.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
@@ -12,24 +12,18 @@
         import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- GLOBAL TELEMETRY ---
+        // --- NEURAL TELEMETRY ---
         window.neuralTelemetry = (component, message, data = null) => {
             const time = new Date().toLocaleTimeString();
             console.log(`%c[NEURAL] [${time}] [${component}] %c${message}`, "color: #10b981; font-weight: bold;", "color: #a1a1aa;", data || "");
         };
 
         const detectGeminiKey = () => {
-            // Priority 1: Environment API Key (For Canvas/Chat previews)
-            if (typeof apiKey !== 'undefined' && apiKey && apiKey !== "") {
-                neuralTelemetry("Handshake", "Environment Variable linked.");
-                return apiKey;
-            }
+            // Priority 1: Check system-provided apiKey
+            if (typeof apiKey !== 'undefined' && apiKey && apiKey !== "") return apiKey;
             // Priority 2: GitHub Secret Injection
             const placeholder = "__GEMINI_API_KEY__";
-            if (placeholder && !placeholder.startsWith("__")) {
-                neuralTelemetry("Handshake", "GitHub Secret Node linked.");
-                return placeholder;
-            }
+            if (placeholder && !placeholder.startsWith("__")) return placeholder;
             return ""; 
         };
 
@@ -40,20 +34,22 @@
             sessionKeys: { gemini: detectGeminiKey(), groq: "__GROQ_API_KEY__" }
         };
 
-        // --- PERSISTENCE NODE HANDSHAKE ---
+        // --- FIREBASE INITIALIZATION ---
         let firebaseConfig = null;
         try {
+            // Environment config (Canvas)
             if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                 firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
             } 
+            // Injected config (GitHub)
             if (!firebaseConfig || !firebaseConfig.apiKey) {
                 const rawInjected = '__FIREBASE_CONFIG_JSON__';
-                if (rawInjected && !rawInjected.startsWith('__')) {
+                if (rawInjected && !rawInjected.startsWith('__') && rawInjected !== '{}') {
                     firebaseConfig = JSON.parse(rawInjected);
-                    neuralTelemetry("Persistence", "Cloud handshake active.");
+                    neuralTelemetry("Persistence", "GitHub Cloud node linked.");
                 }
             }
-        } catch (e) { neuralTelemetry("Config", "Handshake Refused", e); }
+        } catch (e) { neuralTelemetry("Config", "JSON Parse Error: Check FIREBASE_CONFIG formatting.", e); }
 
         if (firebaseConfig && firebaseConfig.apiKey) {
             try {
@@ -77,13 +73,13 @@
                         await signInWithCustomToken(auth, __initial_auth_token);
                     } else { await signInAnonymously(auth); }
                 })();
-            } catch (e) { neuralTelemetry("Firebase", "Offline", e); }
+            } catch (e) { neuralTelemetry("Firebase", "Fatal Initialization Error", e); }
         } else {
-            neuralTelemetry("Persistence", "OFFLINE - Awaiting signal from GitHub Actions.");
+            neuralTelemetry("Persistence", "OFFLINE: Check GitHub Secrets.");
             setTimeout(() => {
                 const sl = document.getElementById('statusLabel');
                 if (sl) sl.innerText = "Persistence Offline";
-            }, 500);
+            }, 1000);
         }
 
         function loadHistory(userId) {
@@ -109,7 +105,7 @@
             const { db, user, appId } = window.SAFESHIP_CONTEXT;
             if (!db || !user) return;
             try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'audits', auditId)); } 
-            catch (e) { neuralTelemetry("History", "Deletion Failed", e); }
+            catch (e) { neuralTelemetry("History", "Delete Failed", e); }
         };
     </script>
 
@@ -136,13 +132,13 @@
                 <h1 class="text-lg font-bold tracking-tight">SafeShip <span class="text-emerald-500">v6.2</span></h1>
             </div>
             <div class="flex-1 overflow-y-auto p-4 space-y-4">
-                <span class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2">Neural History</span>
+                <span class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2">History Traces</span>
                 <div id="historyContainer" class="space-y-2"></div>
             </div>
             <div class="p-4 border-t border-zinc-800/50">
                 <div class="flex items-center gap-3 p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
                     <div class="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center"><i data-lucide="user" class="w-4 h-4 text-zinc-400"></i></div>
-                    <div class="flex flex-col"><span class="text-[10px] text-zinc-500 uppercase font-black">Identity</span><span id="userIdText" class="text-[10px] font-mono text-emerald-500 truncate w-32 tracking-tighter italic">Preview Node</span></div>
+                    <div class="flex flex-col"><span class="text-[10px] text-zinc-500 uppercase font-black">Secure ID</span><span id="userIdText" class="text-[10px] font-mono text-emerald-500 truncate w-32 tracking-tighter">Syncing...</span></div>
                 </div>
             </div>
         </aside>
@@ -155,27 +151,27 @@
                 <div class="flex items-center gap-4">
                     <div id="neuralStatus" class="flex items-center gap-2 px-4 py-2 bg-zinc-900 rounded-xl border border-zinc-800">
                         <div id="statusPulse" class="w-2 h-2 rounded-full bg-zinc-700"></div>
-                        <span id="statusLabel" class="text-[10px] font-black uppercase tracking-widest text-zinc-500">Node Syncing</span>
+                        <span id="statusLabel" class="text-[10px] font-black uppercase tracking-widest text-zinc-500">Initializing Handshake</span>
                     </div>
                 </div>
             </nav>
             <div class="p-8 max-w-5xl mx-auto w-full space-y-8">
-                <div id="urlSection" class="space-y-4 animate-in fade-in slide-in-from-top-4">
+                <div id="urlSection" class="space-y-4">
                     <h2 class="text-4xl font-bold tracking-tighter">Deep <span class="text-emerald-500">Live</span> Probe.</h2>
                     <div class="flex gap-2">
-                        <input type="text" id="urlInput" placeholder="https://target.com" class="flex-1 bg-zinc-900/50 border border-zinc-800 rounded-2xl py-4 px-6 text-sm focus:border-emerald-500 outline-none transition-all">
+                        <input type="text" id="urlInput" placeholder="https://target-endpoint.com" class="flex-1 bg-zinc-900/50 border border-zinc-800 rounded-2xl py-4 px-6 text-sm focus:border-emerald-500 outline-none">
                         <button onclick="startAudit()" class="bg-emerald-500 text-black font-black px-8 rounded-2xl transition-transform active:scale-95">INITIATE</button>
                     </div>
                 </div>
-                <div id="codeSection" class="hidden space-y-4 animate-in fade-in slide-in-from-top-4">
+                <div id="codeSection" class="hidden space-y-4">
                     <h2 class="text-4xl font-bold tracking-tighter">Multi-File <span class="text-emerald-500">SAST</span>.</h2>
                     <div class="border-2 border-dashed border-zinc-800 rounded-3xl p-12 text-center bg-zinc-900/10 cursor-pointer hover:bg-zinc-900/20 transition-all group" onclick="document.getElementById('fileInput').click()">
                         <input type="file" id="fileInput" multiple class="hidden" onchange="handleFiles(event)">
                         <i data-lucide="upload-cloud" class="w-8 h-8 mx-auto mb-4 text-zinc-700 group-hover:text-emerald-500 transition-colors"></i>
-                        <p class="text-sm font-bold">Upload Source Repositories</p>
+                        <p class="text-sm font-bold">Upload Source Repository</p>
                     </div>
                     <div id="fileList" class="flex flex-wrap gap-2"></div>
-                    <button id="codeAuditBtn" onclick="startAudit()" class="w-full bg-white text-black font-black py-4 rounded-2xl disabled:opacity-50 transition-all" disabled>ANALYZE ARCHITECTURE</button>
+                    <button id="codeAuditBtn" onclick="startAudit()" class="w-full bg-white text-black font-black py-4 rounded-2xl disabled:opacity-50" disabled>ANALYZE ARCHITECTURE</button>
                 </div>
                 <div id="resultsArea">
                     <div id="idleState" class="h-[400px] border border-zinc-800/50 rounded-[2.5rem] flex flex-col items-center justify-center bg-black/20 scanline relative overflow-hidden"><i data-lucide="activity" class="w-12 h-12 text-zinc-800 mb-4 animate-pulse"></i><p class="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Awaiting Signal</p></div>
@@ -195,8 +191,7 @@
                 sl.innerText = "Neural Linked"; sl.className = "text-[10px] font-black uppercase text-emerald-500";
             } else {
                 sp.className = "w-2 h-2 rounded-full bg-rose-500";
-                sl.innerText = "Keys Missing"; sl.className = "text-[10px] font-black uppercase text-rose-500";
-                neuralTelemetry("Handshake", "Engine Offline - Awaiting GitHub Secrets.");
+                sl.innerText = "Neural Offline"; sl.className = "text-[10px] font-black uppercase text-rose-500";
             }
         }
         function setMode(m) { auditMode = m; document.getElementById('urlSection').classList.toggle('hidden', m !== 'url'); document.getElementById('codeSection').classList.toggle('hidden', m !== 'code'); }
@@ -217,30 +212,30 @@
             id.classList.add('hidden'); ct.classList.add('hidden'); ld.classList.remove('hidden');
             try {
                 const keys = window.SAFESHIP_CONTEXT.sessionKeys;
-                if (!keys.gemini || keys.gemini.startsWith("__")) throw new Error("Neural Node Missing. Deploy to GitHub Pages to link secrets.");
+                if (!keys.gemini || keys.gemini.startsWith("__")) throw new Error("Neural Node disconnected. Link your API keys in GitHub Secrets.");
                 let data;
                 if (auditMode === 'url') {
-                    const u = document.getElementById('urlInput').value.trim(); if(!u) throw new Error("URL String Null");
-                    ph.innerText = "Simulating Scrape..."; neuralTelemetry("Engine", `Starting Probe: ${u}`);
+                    const u = document.getElementById('urlInput').value.trim(); if(!u) throw new Error("URL Required");
+                    ph.innerText = "Simulating Scrape..."; neuralTelemetry("Engine", `Starting URL Probe: ${u}`);
                     const sc = await simulateScrape(u);
-                    data = await callGemini(`Audit: ${u}. Context: ${sc}`); data.target = u;
+                    data = await callGemini(`Audit website: ${u}. Context: ${sc}`); data.target = u;
                 } else {
-                    ph.innerText = "Tracing Logical Debt...";
+                    ph.innerText = "Scanning Repository...";
                     const code = window.SAFESHIP_CONTEXT.currentFiles.map(f => `File: ${f.name}\n${f.content}`).join('\n\n');
-                    data = await callGemini(`SAST Trace: ${code}`); data.target = "Repo Trace";
+                    data = await callGemini(`SAST Audit: ${code}`); data.target = "Repo Trace";
                 }
                 await window.saveAuditToCloud(data); renderResults(data);
             } catch (err) { 
-                neuralTelemetry("Probe", "Audit Disrupted", err.message);
+                neuralTelemetry("Probe", "Audit Exception", err.message);
                 const msg = document.createElement('div'); msg.className = "p-4 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-xl text-xs font-bold text-center mt-4 animate-bounce";
                 msg.innerText = err.message; document.getElementById('resultsArea').appendChild(msg);
-                setTimeout(() => msg.remove(), 6000);
+                setTimeout(() => msg.remove(), 5000);
                 ld.classList.add('hidden'); id.classList.remove('hidden'); 
             }
         }
         async function simulateScrape(u) {
             try { const r = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(u)}`); const d = await r.json(); return d.contents.substring(0, 4000); }
-            catch (e) { neuralTelemetry("Scrape", "CORS/Proxy Disruption", e); return "Scrape Data Limited."; }
+            catch (e) { return "Scrape Data Limited."; }
         }
         async function callGemini(p) {
             const k = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
@@ -250,7 +245,7 @@
             if (!r.ok) {
                 const errData = await r.json().catch(() => ({}));
                 neuralTelemetry("Gemini-Node", `HTTP ${r.status}`, errData);
-                throw new Error(`Node Refused Connection (HTTP ${r.status})`);
+                throw new Error(`Neural Node Refused Connection (HTTP ${r.status})`);
             }
             const d = await r.json(); return JSON.parse(d.candidates[0].content.parts[0].text);
         }
@@ -258,32 +253,32 @@
             const ct = document.getElementById('contentState'); document.getElementById('loadingState').classList.add('hidden'); ct.classList.remove('hidden');
             ct.innerHTML = `
                 <div class="flex justify-between items-end">
-                    <div><span class="text-[10px] font-black uppercase text-zinc-500 tracking-widest">Trace Integrity</span><h3 class="text-6xl font-bold tracking-tighter">${d.score}%</h3></div>
+                    <div><span class="text-[10px] font-black uppercase text-zinc-500 tracking-widest">Verdict</span><h3 class="text-6xl font-bold tracking-tighter">${d.score}%</h3></div>
                     <div class="flex gap-2">
-                        <button onclick='exportJSON(${JSON.stringify(d).replace(/'/g, "&apos;")})' class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-white" title="Export Report"><i data-lucide="download"></i></button>
-                        <button onclick='resetUI()' class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-rose-500" title="Reset Signal"><i data-lucide="refresh-cw"></i></button>
+                        <button onclick='exportJSON(${JSON.stringify(d).replace(/'/g, "&apos;")})' class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-white" title="Export JSON"><i data-lucide="download"></i></button>
+                        <button onclick='resetUI()' class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-rose-500" title="Reset"><i data-lucide="refresh-cw"></i></button>
                     </div>
                 </div>
                 <div class="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-[2rem] text-sm text-zinc-400 leading-relaxed">${d.summary}</div>
                 <div class="space-y-4">${d.findings.map(f => `
-                    <div class="bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6 group hover:border-zinc-700 transition-all">
+                    <div class="bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6 group transition-all hover:border-zinc-700">
                         <div class="flex justify-between items-start mb-2"><h4 class="font-bold text-white">${f.title}</h4><span class="text-[10px] px-2 py-0.5 rounded bg-black border border-zinc-800 text-zinc-500 font-mono">${f.severity.toUpperCase()}</span></div>
                         <p class="text-xs text-zinc-500 font-mono mb-2">${f.location}</p><p class="text-sm text-zinc-400 mb-4">${f.description}</p>
                         <div class="p-4 bg-black/40 rounded-xl border border-emerald-500/10 relative">
-                            <p class="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-2">Neural Remediation</p>
+                            <p class="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-2">Neural Fix</p>
                             <code class="text-xs font-mono text-emerald-400 whitespace-pre-wrap block pr-8">${f.fix}</code>
-                            <button onclick="copyToClipboard(\`${f.fix.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)" class="absolute top-4 right-4 p-2 bg-zinc-900 rounded-lg text-zinc-600 hover:text-emerald-500 opacity-0 group-hover:opacity-100 transition-all"><i data-lucide="copy" class="w-3 h-3"></i></button>
+                            <button onclick="copyToClipboard(\`${f.fix.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)" class="absolute top-4 right-4 p-2 bg-zinc-900 rounded-lg text-zinc-600 hover:text-emerald-500 opacity-0 group-hover:opacity-100"><i data-lucide="copy" class="w-3 h-3"></i></button>
                         </div>
                     </div>`).join('')}</div>`; lucide.createIcons();
         }
         function renderHistory() {
             const h = window.SAFESHIP_CONTEXT.history, c = document.getElementById('historyContainer');
-            if (h.length === 0) { c.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold border border-zinc-900 rounded-xl">Idle Trace History</div>`; return; }
+            if (h.length === 0) { c.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold border border-zinc-900 rounded-xl">No History Found</div>`; return; }
             c.innerHTML = h.map(i => `
                 <div class="group p-3 bg-zinc-900/30 border border-zinc-800/50 rounded-xl hover:border-emerald-500/50 cursor-pointer transition-all relative">
                     <div onclick='renderResults(${JSON.stringify(i).replace(/'/g, "&apos;")})' class="pr-8">
                         <div class="flex justify-between items-center mb-1"><span class="text-[10px] font-bold text-emerald-500">${i.score}%</span><span class="text-[9px] text-zinc-600 font-mono">${i.timestamp ? new Date(i.timestamp.seconds * 1000).toLocaleDateString() : 'Syncing'}</span></div>
-                        <p class="text-[11px] font-medium text-zinc-400 truncate">${i.target || 'Trace Node'}</p>
+                        <p class="text-[11px] font-medium text-zinc-400 truncate">${i.target || 'Trace'}</p>
                     </div>
                     <button onclick="deleteAudit('${i.id}')" class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-zinc-700 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
                 </div>`).join(''); lucide.createIcons();
