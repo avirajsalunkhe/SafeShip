@@ -27,6 +27,7 @@ jobs:
             import os
             import sys
             import json
+            import re
 
             filename = 'index.html'
             if not os.path.exists(filename):
@@ -36,57 +37,67 @@ jobs:
             with open(filename, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            gemini_key     = os.environ.get('GEMINI_API_KEY', '').strip()
-            groq_key       = os.environ.get('GROQ_API_KEY', '').strip()
-            firebase_raw   = os.environ.get('FIREBASE_CONFIG', '').strip()
+            gemini_key   = os.environ.get('GEMINI_API_KEY', '').strip()
+            groq_key     = os.environ.get('GROQ_API_KEY', '').strip()
+            firebase_raw = os.environ.get('FIREBASE_CONFIG', '').strip()
 
-            # ── Validate secrets are actually set ────────────────────────────────
+            # Validate AI keys
             missing = []
-            if not gemini_key:  missing.append('GEMINI_API_KEY')
-            if not groq_key:    missing.append('GROQ_API_KEY')
-            if not firebase_raw or firebase_raw == '{}': missing.append('FIREBASE_CONFIG')
-
+            if not gemini_key: missing.append('GEMINI_API_KEY')
+            if not groq_key:   missing.append('GROQ_API_KEY')
             if missing:
-                print(f"[!] WARNING: The following secrets are EMPTY in GitHub Secrets: {', '.join(missing)}")
-                print(f"[!] Go to: Settings → Secrets and variables → Actions → Repository secrets")
-                # Do not exit — a partial deploy is still valid if at least one AI key is present.
-                # But if BOTH AI keys are missing, abort.
-                if 'GEMINI_API_KEY' in missing and 'GROQ_API_KEY' in missing:
-                    print("[!] CRITICAL: Both GEMINI_API_KEY and GROQ_API_KEY are empty. Aborting.")
-                    sys.exit(1)
-            # ────────────────────────────────────────────────────────────────────
+                print(f"[!] WARNING: Empty secrets: {', '.join(missing)}")
+            if 'GEMINI_API_KEY' in missing and 'GROQ_API_KEY' in missing:
+                print("[!] CRITICAL: Both AI keys are empty. Aborting.")
+                sys.exit(1)
 
-            # ── Minify Firebase config JSON ──────────────────────────────────────
-            firebase_injected = '{}'
+            # ── Parse Firebase config ────────────────────────────────────────────
+            # Handles both formats people paste from Firebase console:
+            #   Format A (JS object, unquoted keys):  { apiKey: "...", projectId: "..." }
+            #   Format B (strict JSON, quoted keys):  { "apiKey": "...", "projectId": "..." }
+            firebase_object = 'null'
             if firebase_raw and firebase_raw != '{}':
                 try:
-                    cleaned = firebase_raw.strip().replace("'", '"')
-                    firebase_injected = json.dumps(json.loads(cleaned))
-                    print("[*] Firebase config minified and injected.")
+                    # Step 1: normalize to strict JSON
+                    # - replace smart/curly quotes with straight quotes
+                    normalized = firebase_raw
+                    normalized = normalized.replace('\u201c', '"').replace('\u201d', '"')
+                    normalized = normalized.replace('\u2018', "'").replace('\u2019', "'")
+                    # - quote any unquoted JS object keys:  apiKey:  ->  "apiKey":
+                    normalized = re.sub(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)', r'\1"\2"\3', normalized)
+                    # - replace single-quoted values with double-quoted values
+                    normalized = re.sub(r"'([^']*)'", r'"\1"', normalized)
+                    # - remove trailing commas before } (invalid JSON)
+                    normalized = re.sub(r',\s*}', '}', normalized)
+
+                    parsed = json.loads(normalized)
+                    firebase_object = json.dumps(parsed)
+                    print("[*] Firebase config parsed and minified OK.")
+                    print(f"[*] Firebase projectId: {parsed.get('projectId', 'unknown')}")
                 except Exception as e:
-                    firebase_injected = firebase_raw
-                    print(f"[!] Firebase config injected raw (parse failed: {e}).")
+                    print(f"[!] Firebase JSON parse FAILED: {e}")
+                    print(f"[!] App will run in standalone mode (no cloud persistence).")
             # ────────────────────────────────────────────────────────────────────
 
-            # ── Replace placeholders ─────────────────────────────────────────────
-            # These match exactly the var declarations in index.html:
-            #   var INJECTED_GEMINI_KEY = "__GEMINI_API_KEY__";
-            #   var INJECTED_GROQ_KEY   = "__GROQ_API_KEY__";
-            #   var INJECTED_FIREBASE   = '__FIREBASE_CONFIG_JSON__';
-
-            replacements = {
-                '__GEMINI_API_KEY__':    gemini_key,
-                '__GROQ_API_KEY__':      groq_key,
-                '__FIREBASE_CONFIG_JSON__': firebase_injected,
-            }
-
-            for placeholder, value in replacements.items():
+            # Inject GEMINI + GROQ keys (inside double-quoted strings in HTML)
+            for placeholder, value, label in [
+                ('__GEMINI_API_KEY__', gemini_key, 'GEMINI_API_KEY'),
+                ('__GROQ_API_KEY__',   groq_key,   'GROQ_API_KEY'),
+            ]:
                 if placeholder in content:
                     content = content.replace(placeholder, value)
-                    print(f"[*] Injected: {placeholder} ({'OK' if value else 'EMPTY'})")
+                    print(f"[*] {label} injected: {'OK' if value else 'EMPTY'}")
                 else:
-                    print(f"[!] WARNING: Placeholder '{placeholder}' not found in {filename}. Check the HTML file.")
-            # ────────────────────────────────────────────────────────────────────
+                    print(f"[!] WARNING: {placeholder} not found in HTML.")
+
+            # Inject Firebase as bare JS object (NO quotes around placeholder in HTML)
+            # HTML line:    var INJECTED_FIREBASE = __FIREBASE_CONFIG_JSON__;
+            # After inject: var INJECTED_FIREBASE = {"apiKey":"AIza...","projectId":"safeship-trace",...};
+            if '__FIREBASE_CONFIG_JSON__' in content:
+                content = content.replace('__FIREBASE_CONFIG_JSON__', firebase_object)
+                print(f"[*] FIREBASE_CONFIG injected: {'OK' if firebase_object != 'null' else 'null (standalone mode)'}")
+            else:
+                print("[!] WARNING: __FIREBASE_CONFIG_JSON__ not found in HTML.")
 
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(content)
