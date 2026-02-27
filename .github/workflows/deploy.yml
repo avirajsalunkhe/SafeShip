@@ -36,34 +36,61 @@ jobs:
             with open(filename, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            # Mapping placeholders to environment values
+            gemini_key     = os.environ.get('GEMINI_API_KEY', '').strip()
+            groq_key       = os.environ.get('GROQ_API_KEY', '').strip()
+            firebase_raw   = os.environ.get('FIREBASE_CONFIG', '').strip()
+
+            # ── Validate secrets are actually set ────────────────────────────────
+            missing = []
+            if not gemini_key:  missing.append('GEMINI_API_KEY')
+            if not groq_key:    missing.append('GROQ_API_KEY')
+            if not firebase_raw or firebase_raw == '{}': missing.append('FIREBASE_CONFIG')
+
+            if missing:
+                print(f"[!] WARNING: The following secrets are EMPTY in GitHub Secrets: {', '.join(missing)}")
+                print(f"[!] Go to: Settings → Secrets and variables → Actions → Repository secrets")
+                # Do not exit — a partial deploy is still valid if at least one AI key is present.
+                # But if BOTH AI keys are missing, abort.
+                if 'GEMINI_API_KEY' in missing and 'GROQ_API_KEY' in missing:
+                    print("[!] CRITICAL: Both GEMINI_API_KEY and GROQ_API_KEY are empty. Aborting.")
+                    sys.exit(1)
+            # ────────────────────────────────────────────────────────────────────
+
+            # ── Minify Firebase config JSON ──────────────────────────────────────
+            firebase_injected = '{}'
+            if firebase_raw and firebase_raw != '{}':
+                try:
+                    cleaned = firebase_raw.strip().replace("'", '"')
+                    firebase_injected = json.dumps(json.loads(cleaned))
+                    print("[*] Firebase config minified and injected.")
+                except Exception as e:
+                    firebase_injected = firebase_raw
+                    print(f"[!] Firebase config injected raw (parse failed: {e}).")
+            # ────────────────────────────────────────────────────────────────────
+
+            # ── Replace placeholders ─────────────────────────────────────────────
+            # These match exactly the var declarations in index.html:
+            #   var INJECTED_GEMINI_KEY = "__GEMINI_API_KEY__";
+            #   var INJECTED_GROQ_KEY   = "__GROQ_API_KEY__";
+            #   var INJECTED_FIREBASE   = '__FIREBASE_CONFIG_JSON__';
+
             replacements = {
-                '__GEMINI_API_KEY__': os.environ.get('GEMINI_API_KEY', ''),
-                '__GROQ_API_KEY__': os.environ.get('GROQ_API_KEY', ''),
-                '__FIREBASE_CONFIG_JSON__': os.environ.get('FIREBASE_CONFIG', '{}')
+                '__GEMINI_API_KEY__':    gemini_key,
+                '__GROQ_API_KEY__':      groq_key,
+                '__FIREBASE_CONFIG_JSON__': firebase_injected,
             }
 
             for placeholder, value in replacements.items():
-                if not value or value.strip() == "" or value == "{}":
-                    print(f"[!] WARNING: {placeholder} appears empty. Check GitHub Secrets.")
-                
-                # If it's the config, try to minify it to avoid line-break issues in JS strings
-                if placeholder == '__FIREBASE_CONFIG_JSON__' and value != '{}':
-                    try:
-                        # Clean up common copy-paste errors
-                        cleaned = value.strip().replace("'", '"')
-                        minified = json.dumps(json.loads(cleaned))
-                        content = content.replace(placeholder, minified)
-                        print(f"[*] Firebase config minified and injected.")
-                    except:
-                        content = content.replace(placeholder, value)
-                        print(f"[!] Injected raw config (parsing failed).")
-                else:
+                if placeholder in content:
                     content = content.replace(placeholder, value)
+                    print(f"[*] Injected: {placeholder} ({'OK' if value else 'EMPTY'})")
+                else:
+                    print(f"[!] WARNING: Placeholder '{placeholder}' not found in {filename}. Check the HTML file.")
+            # ────────────────────────────────────────────────────────────────────
 
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(content)
-            
+
             print("[*] Handshake Complete: Secrets synced to production node.")
 
       - name: Deploy to GitHub Pages
