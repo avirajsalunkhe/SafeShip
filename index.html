@@ -19,9 +19,7 @@
         };
 
         const detectGeminiKey = () => {
-            // Priority 1: Check system-provided apiKey
             if (typeof apiKey !== 'undefined' && apiKey && apiKey !== "") return apiKey;
-            // Priority 2: GitHub Secret Injection
             const placeholder = "__GEMINI_API_KEY__";
             if (placeholder && !placeholder.startsWith("__")) return placeholder;
             return ""; 
@@ -36,20 +34,22 @@
 
         // --- FIREBASE INITIALIZATION ---
         let firebaseConfig = null;
+        const rawInjected = '__FIREBASE_CONFIG_JSON__';
+
         try {
-            // Environment config (Canvas)
+            // Priority 1: Canvas Environment
             if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                 firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
             } 
-            // Injected config (GitHub)
-            if (!firebaseConfig || !firebaseConfig.apiKey) {
-                const rawInjected = '__FIREBASE_CONFIG_JSON__';
-                if (rawInjected && !rawInjected.startsWith('__') && rawInjected !== '{}') {
-                    firebaseConfig = JSON.parse(rawInjected);
-                    neuralTelemetry("Persistence", "GitHub Cloud node linked.");
-                }
+            // Priority 2: GitHub Injected Secret
+            else if (rawInjected && !rawInjected.startsWith('__') && rawInjected !== '{}') {
+                firebaseConfig = JSON.parse(rawInjected);
+                neuralTelemetry("Persistence", "GitHub Cloud node linked.");
             }
-        } catch (e) { neuralTelemetry("Config", "JSON Parse Error: Check FIREBASE_CONFIG formatting.", e); }
+        } catch (e) { 
+            neuralTelemetry("Config", "FATAL: Firebase Secret is malformed. Verify JSON in GitHub Secrets.", e);
+            console.error("Raw content attempted:", rawInjected);
+        }
 
         if (firebaseConfig && firebaseConfig.apiKey) {
             try {
@@ -75,10 +75,14 @@
                 })();
             } catch (e) { neuralTelemetry("Firebase", "Fatal Initialization Error", e); }
         } else {
-            neuralTelemetry("Persistence", "OFFLINE: Check GitHub Secrets.");
+            // This is the expected state in the Canvas Preview
+            neuralTelemetry("Persistence", "STANDALONE MODE: Connect to GitHub to enable Cloud History.");
             setTimeout(() => {
                 const sl = document.getElementById('statusLabel');
-                if (sl) sl.innerText = "Persistence Offline";
+                if (sl) {
+                    sl.innerText = "Persistence Offline";
+                    sl.className = "text-[10px] font-black uppercase tracking-widest text-zinc-500";
+                }
             }, 1000);
         }
 
@@ -138,7 +142,7 @@
             <div class="p-4 border-t border-zinc-800/50">
                 <div class="flex items-center gap-3 p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
                     <div class="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center"><i data-lucide="user" class="w-4 h-4 text-zinc-400"></i></div>
-                    <div class="flex flex-col"><span class="text-[10px] text-zinc-500 uppercase font-black">Secure ID</span><span id="userIdText" class="text-[10px] font-mono text-emerald-500 truncate w-32 tracking-tighter">Syncing...</span></div>
+                    <div class="flex flex-col"><span class="text-[10px] text-zinc-500 uppercase font-black">Secure ID</span><span id="userIdText" class="text-[10px] font-mono text-emerald-500 truncate w-32 tracking-tighter italic">Preview Node</span></div>
                 </div>
             </div>
         </aside>
@@ -151,7 +155,7 @@
                 <div class="flex items-center gap-4">
                     <div id="neuralStatus" class="flex items-center gap-2 px-4 py-2 bg-zinc-900 rounded-xl border border-zinc-800">
                         <div id="statusPulse" class="w-2 h-2 rounded-full bg-zinc-700"></div>
-                        <span id="statusLabel" class="text-[10px] font-black uppercase tracking-widest text-zinc-500">Initializing Handshake</span>
+                        <span id="statusLabel" class="text-[10px] font-black uppercase tracking-widest text-zinc-500">Awaiting Signal</span>
                     </div>
                 </div>
             </nav>
