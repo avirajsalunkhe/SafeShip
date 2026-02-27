@@ -20,22 +20,22 @@
 
         // Resolution: Priorities Environment > Injected Secret
         const getGeminiKey = () => {
-            // Check for global apiKey (environment injection)
             if (typeof apiKey !== 'undefined' && apiKey && apiKey !== "") return apiKey;
-            
-            // Check for injected placeholder (GitHub Actions)
             const placeholder = "__GEMINI_API_KEY__";
             if (placeholder && !placeholder.startsWith("__") && placeholder !== "") return placeholder;
-            
+            return null;
+        };
+
+        const getGroqKey = () => {
+            const placeholder = "__GROQ_API_KEY__";
+            if (placeholder && !placeholder.startsWith("__") && placeholder !== "") return placeholder;
             return null;
         };
 
         const getFirebaseConfig = () => {
-            // Priority 1: Environment provided config (Canvas/Preview)
             if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                 return typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
             }
-            // Priority 2: Injected placeholder (GitHub Actions)
             const placeholder = '__FIREBASE_CONFIG_JSON__';
             if (placeholder && !placeholder.startsWith("__") && placeholder !== "" && placeholder !== "{}") {
                 return JSON.parse(placeholder);
@@ -49,7 +49,10 @@
             db: null, auth: null,
             appId: appId,
             user: null, history: [], currentFiles: [],
-            sessionKeys: { gemini: getGeminiKey() }
+            sessionKeys: { 
+                gemini: getGeminiKey(),
+                groq: getGroqKey()
+            }
         };
 
         // --- FIREBASE INITIALIZATION ---
@@ -65,7 +68,6 @@
                     window.SAFESHIP_CONTEXT.auth = auth;
                     window.SAFESHIP_CONTEXT.db = db;
 
-                    // Auth handler
                     onAuthStateChanged(auth, (user) => {
                         window.SAFESHIP_CONTEXT.user = user;
                         const uidEl = document.getElementById('userIdText');
@@ -77,7 +79,6 @@
                         }
                     });
                     
-                    // Trigger Auth
                     updateStatusUI("Connecting Node", "text-zinc-500");
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                         await signInWithCustomToken(auth, __initial_auth_token);
@@ -103,8 +104,10 @@
                 sl.className = `text-[10px] font-black uppercase tracking-widest ${colorClass}`;
             }
             if (sp) {
-                if (label.includes("Linked")) {
+                if (label.includes("Linked") || label.includes("Active")) {
                     sp.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+                } else if (label.includes("Fallback")) {
+                    sp.className = "w-2 h-2 rounded-full bg-amber-500 animate-pulse";
                 } else if (label.includes("Offline") || label.includes("Error")) {
                     sp.className = "w-2 h-2 rounded-full bg-rose-500";
                 } else {
@@ -150,25 +153,27 @@
         };
 
         function autoConfigureNodes() {
-            const checkKey = () => {
-                const key = getGeminiKey();
-                window.SAFESHIP_CONTEXT.sessionKeys.gemini = key;
-                if (key) {
-                    neuralTelemetry("Engine", "Neural Core Handshake Success.");
-                    // Only update UI if we aren't already cloud linked
-                    const sl = document.getElementById('statusLabel');
-                    if (sl && !sl.innerText.includes("Cloud")) {
-                        updateStatusUI("Neural Active", "text-emerald-500");
-                    }
+            const checkKeys = () => {
+                const gemini = getGeminiKey();
+                const groq = getGroqKey();
+                window.SAFESHIP_CONTEXT.sessionKeys.gemini = gemini;
+                window.SAFESHIP_CONTEXT.sessionKeys.groq = groq;
+
+                const sl = document.getElementById('statusLabel');
+                if (gemini) {
+                    neuralTelemetry("Engine", "Gemini Node Handshake Success.");
+                    if (sl && !sl.innerText.includes("Cloud")) updateStatusUI("Neural Active", "text-emerald-500");
+                } else if (groq) {
+                    neuralTelemetry("Engine", "Gemini Node Missing. Falling back to Groq Handshake.");
+                    if (sl && !sl.innerText.includes("Cloud")) updateStatusUI("Groq Fallback", "text-amber-500");
                 } else {
-                    neuralTelemetry("Engine", "CRITICAL: Gemini Key missing from environment.");
+                    neuralTelemetry("Engine", "CRITICAL: No Neural Nodes linked to environment.");
                 }
             };
 
-            // Canvas environment key injection can sometimes take a millisecond
-            checkKey();
-            if (!window.SAFESHIP_CONTEXT.sessionKeys.gemini) {
-                setTimeout(checkKey, 500);
+            checkKeys();
+            if (!window.SAFESHIP_CONTEXT.sessionKeys.gemini && !window.SAFESHIP_CONTEXT.sessionKeys.groq) {
+                setTimeout(checkKeys, 1000);
             }
         }
     </script>
@@ -280,22 +285,22 @@
             id.classList.add('hidden'); ct.classList.add('hidden'); ld.classList.remove('hidden');
             
             try {
-                const key = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
-                if (!key) throw new Error("Neural core is offline. Verify GEMINI_API_KEY in repository secrets.");
+                const keys = window.SAFESHIP_CONTEXT.sessionKeys;
+                if (!keys.gemini && !keys.groq) throw new Error("No Neural Node online. Verify Secrets.");
                 
-                let targetLabel, payload;
+                let targetLabel, prompt;
                 if (auditMode === 'url') {
                     const u = document.getElementById('urlInput').value.trim(); if(!u) throw new Error("URL Required");
                     targetLabel = u;
                     ph.innerText = "Intercepting headers...";
-                    payload = `Conduct a security audit of this URL: ${u}`;
+                    prompt = `Conduct a security audit of this URL: ${u}`;
                 } else {
                     targetLabel = "Repository Trace";
                     ph.innerText = "Analyzing semantic flow...";
-                    payload = "SAST Audit Report for these files:\n" + window.SAFESHIP_CONTEXT.currentFiles.map(f => `File: ${f.name}\n${f.content}`).join('\n\n');
+                    prompt = "SAST Audit Report for these files:\n" + window.SAFESHIP_CONTEXT.currentFiles.map(f => `File: ${f.name}\n${f.content}`).join('\n\n');
                 }
 
-                const data = await callGemini(payload);
+                const data = await callNeuralNode(prompt);
                 data.target = targetLabel;
                 await window.saveAuditToCloud(data);
                 renderResults(data);
@@ -306,17 +311,62 @@
             }
         }
 
-        async function callGemini(prompt) {
-            const key = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
+        async function callNeuralNode(prompt) {
+            const keys = window.SAFESHIP_CONTEXT.sessionKeys;
+            const fullPrompt = prompt + "\nRespond ONLY in valid JSON: {score: number, summary: string, findings: [{title: string, severity: string, description: string, location: string, fix: string}]}";
+
+            // Priority 1: Gemini
+            if (keys.gemini) {
+                try {
+                    neuralTelemetry("Engine", "Initiating Gemini Trace...");
+                    return await callGeminiAPI(keys.gemini, fullPrompt);
+                } catch (e) {
+                    if (keys.groq) {
+                        neuralTelemetry("Engine", "Gemini Node Failure. Switching to Groq Fallback...");
+                        return await callGroqAPI(keys.groq, fullPrompt);
+                    }
+                    throw e;
+                }
+            } 
+            // Priority 2: Groq Fallback
+            else if (keys.groq) {
+                neuralTelemetry("Engine", "Using Groq Fallback Node.");
+                return await callGroqAPI(keys.groq, fullPrompt);
+            }
+            throw new Error("Handshake Failed: No valid API keys.");
+        }
+
+        async function callGeminiAPI(key, prompt) {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`;
-            const body = {
-                contents: [{ parts: [{ text: prompt + "\nRespond ONLY in valid JSON matching the schema: {score: number, summary: string, findings: [{title: string, severity: string, description: string, location: string, fix: string}]}" }] }],
-                generationConfig: { responseMimeType: "application/json" }
-            };
-            const r = await fetch(url, { method: 'POST', body: JSON.stringify(body) });
-            if (!r.ok) throw new Error(`Neural Node Refused Connection (HTTP ${r.status})`);
-            const res = await r.json();
-            return JSON.parse(res.candidates[0].content.parts[0].text);
+            const res = await fetch(url, {
+                method: 'POST',
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: { responseMimeType: "application/json" }
+                })
+            });
+            if (!res.ok) throw new Error("Gemini Service Error");
+            const data = await res.json();
+            return JSON.parse(data.candidates[0].content.parts[0].text);
+        }
+
+        async function callGroqAPI(key, prompt) {
+            const url = "https://api.groq.com/openai/v1/chat/completions";
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${key}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: "llama-3.3-70b-versatile",
+                    messages: [{ role: "user", content: prompt }],
+                    response_format: { type: "json_object" }
+                })
+            });
+            if (!res.ok) throw new Error("Groq Service Error");
+            const data = await res.json();
+            return JSON.parse(data.choices[0].message.content);
         }
 
         function renderResults(d) {
