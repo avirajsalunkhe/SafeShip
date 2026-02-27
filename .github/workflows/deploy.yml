@@ -26,6 +26,7 @@ jobs:
         run: |
             import os
             import sys
+            import json
 
             filename = 'index.html'
             if not os.path.exists(filename):
@@ -45,17 +46,27 @@ jobs:
             # Neural Integrity Check
             failed_injection = False
             for placeholder, value in replacements.items():
+                # Check if secret exists
                 if not value or value.strip() == "" or value == "{}":
-                    print(f"[!] TELEMETRY ALERT: Secret for {placeholder} is missing or empty.")
-                    # We don't exit yet to allow the script to report all missing secrets
+                    print(f"[!] TELEMETRY ALERT: Secret for {placeholder} is missing in GitHub Repository Settings.")
                     failed_injection = True
-                else:
-                    print(f"[*] TELEMETRY: Successfully prepared injection for {placeholder}.")
+                    continue
                 
+                # Special validation for Firebase Config JSON
+                if placeholder == '__FIREBASE_CONFIG_JSON__':
+                    try:
+                        json.loads(value)
+                        print("[*] TELEMETRY: FIREBASE_CONFIG validated as valid JSON.")
+                    except ValueError as e:
+                        print(f"[!] CRITICAL: FIREBASE_CONFIG is NOT valid JSON. Error: {str(e)}")
+                        print("[?] HINT: Ensure your secret contains ONLY the { ... } object, no variable names.")
+                        failed_injection = True
+                
+                print(f"[*] TELEMETRY: Successfully prepared injection for {placeholder}.")
                 content = content.replace(placeholder, value)
 
             if failed_injection:
-                print("[!] DEPLOYMENT ABORTED: One or more critical Neural Nodes are missing secrets.")
+                print("[!] DEPLOYMENT ABORTED: One or more critical Neural Nodes are missing or malformed secrets.")
                 sys.exit(1)
 
             with open(filename, 'w', encoding='utf-8') as f:
