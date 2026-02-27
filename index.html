@@ -6,7 +6,22 @@
     <title>SafeShip | Neural Trace Engine v6.2.4</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    
+
+    <!--
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  INJECTED BY DEPLOY PIPELINE — DO NOT EDIT THESE LINES      ║
+    ║  These are replaced at build time by deploy.yml              ║
+    ╚══════════════════════════════════════════════════════════════╝
+    -->
+    <script>
+        // These values are injected by the GitHub Actions deploy pipeline.
+        // The placeholders below are replaced with real secret values during build.
+        // They are plain JS variables so the module script below can read them.
+        var INJECTED_GEMINI_KEY = "__GEMINI_API_KEY__";
+        var INJECTED_GROQ_KEY   = "__GROQ_API_KEY__";
+        var INJECTED_FIREBASE   = '__FIREBASE_CONFIG_JSON__';
+    </script>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -18,40 +33,36 @@
             console.log(`%c[NEURAL] [${time}] [${component}] %c${message}`, "color: #10b981; font-weight: bold;", "color: #a1a1aa;", data || "");
         };
 
-        // Resolution: Priorities Environment > Injected Secret
-        const getGeminiKey = () => {
-            if (typeof apiKey !== 'undefined' && apiKey && apiKey !== "") return apiKey;
-            const placeholder = "__GEMINI_API_KEY__";
-            if (placeholder && !placeholder.startsWith("__") && placeholder !== "") return placeholder;
-            return null;
-        };
+        // ── KEY RESOLUTION ─────────────────────────────────────────────────────
+        // The deploy.yml pipeline replaces the __PLACEHOLDER__ strings inside the
+        // INJECTED_* variables above with real secret values.
+        // We check: if the value still looks like a placeholder → key not injected.
+        const isInjected = (val) => val && val !== "" && !val.startsWith("__") && !val.endsWith("__");
 
-        const getGroqKey = () => {
-            const placeholder = "__GROQ_API_KEY__";
-            if (placeholder && !placeholder.startsWith("__") && placeholder !== "") return placeholder;
-            return null;
-        };
+        const getGeminiKey = () => isInjected(window.INJECTED_GEMINI_KEY) ? window.INJECTED_GEMINI_KEY : null;
+        const getGroqKey   = () => isInjected(window.INJECTED_GROQ_KEY)   ? window.INJECTED_GROQ_KEY   : null;
 
         const getFirebaseConfig = () => {
-            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                return typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
+            const raw = window.INJECTED_FIREBASE;
+            if (!isInjected(raw)) return null;
+            try {
+                return typeof raw === 'object' ? raw : JSON.parse(raw);
+            } catch (e) {
+                neuralTelemetry("Firebase", "Config parse error", e);
+                return null;
             }
-            const placeholder = '__FIREBASE_CONFIG_JSON__';
-            if (placeholder && !placeholder.startsWith("__") && placeholder !== "" && placeholder !== "{}") {
-                return JSON.parse(placeholder);
-            }
-            return null;
         };
+        // ───────────────────────────────────────────────────────────────────────
 
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'safeship-trace-v6';
+        const appId = 'safeship-trace-v6';
 
         window.SAFESHIP_CONTEXT = {
             db: null, auth: null,
             appId: appId,
             user: null, history: [], currentFiles: [],
-            sessionKeys: { 
+            sessionKeys: {
                 gemini: getGeminiKey(),
-                groq: getGroqKey()
+                groq:   getGroqKey()
             }
         };
 
@@ -61,30 +72,25 @@
 
             if (config && config.apiKey) {
                 try {
-                    const app = initializeApp(config);
+                    const app  = initializeApp(config);
                     const auth = getAuth(app);
-                    const db = getFirestore(app);
-                    
+                    const db   = getFirestore(app);
+
                     window.SAFESHIP_CONTEXT.auth = auth;
-                    window.SAFESHIP_CONTEXT.db = db;
+                    window.SAFESHIP_CONTEXT.db   = db;
 
                     onAuthStateChanged(auth, (user) => {
                         window.SAFESHIP_CONTEXT.user = user;
                         const uidEl = document.getElementById('userIdText');
                         if (uidEl) uidEl.innerText = user ? user.uid : "Connecting...";
-                        
                         if (user) {
                             updateStatusUI("Cloud Linked", "text-emerald-500");
                             loadHistory(user.uid);
                         }
                     });
-                    
+
                     updateStatusUI("Connecting Node", "text-zinc-500");
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await signInWithCustomToken(auth, __initial_auth_token);
-                    } else { 
-                        await signInAnonymously(auth); 
-                    }
+                    await signInAnonymously(auth);
                     neuralTelemetry("Persistence", "Uplink Established.");
                 } catch (e) {
                     neuralTelemetry("Firebase", "Initialization Error", e);
@@ -120,7 +126,7 @@
             const { db, appId } = window.SAFESHIP_CONTEXT;
             if (!db) return;
             onSnapshot(collection(db, 'artifacts', appId, 'users', userId, 'audits'), (snap) => {
-                const audits = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                const audits = snap.docs.map(d => ({ id: d.id, ...d.data() }))
                     .sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
                 window.SAFESHIP_CONTEXT.history = audits;
                 renderHistory();
@@ -142,7 +148,7 @@
         window.deleteAudit = async (auditId) => {
             const { db, user, appId } = window.SAFESHIP_CONTEXT;
             if (!db || !user) return;
-            try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'audits', auditId)); } 
+            try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'audits', auditId)); }
             catch (e) { neuralTelemetry("Storage", "Delete Error", e); }
         };
 
@@ -153,27 +159,21 @@
         };
 
         function autoConfigureNodes() {
-            const checkKeys = () => {
-                const gemini = getGeminiKey();
-                const groq = getGroqKey();
-                window.SAFESHIP_CONTEXT.sessionKeys.gemini = gemini;
-                window.SAFESHIP_CONTEXT.sessionKeys.groq = groq;
+            const gemini = getGeminiKey();
+            const groq   = getGroqKey();
+            window.SAFESHIP_CONTEXT.sessionKeys.gemini = gemini;
+            window.SAFESHIP_CONTEXT.sessionKeys.groq   = groq;
 
-                const sl = document.getElementById('statusLabel');
-                if (gemini) {
-                    neuralTelemetry("Engine", "Gemini Node Handshake Success.");
-                    if (sl && !sl.innerText.includes("Cloud")) updateStatusUI("Neural Active", "text-emerald-500");
-                } else if (groq) {
-                    neuralTelemetry("Engine", "Gemini Node Missing. Falling back to Groq Handshake.");
-                    if (sl && !sl.innerText.includes("Cloud")) updateStatusUI("Groq Fallback", "text-amber-500");
-                } else {
-                    neuralTelemetry("Engine", "CRITICAL: No Neural Nodes linked to environment.");
-                }
-            };
-
-            checkKeys();
-            if (!window.SAFESHIP_CONTEXT.sessionKeys.gemini && !window.SAFESHIP_CONTEXT.sessionKeys.groq) {
-                setTimeout(checkKeys, 1000);
+            const sl = document.getElementById('statusLabel');
+            if (gemini) {
+                neuralTelemetry("Engine", "Gemini Node Handshake Success.");
+                if (sl && !sl.innerText.includes("Cloud")) updateStatusUI("Neural Active", "text-emerald-500");
+            } else if (groq) {
+                neuralTelemetry("Engine", "Gemini Node Missing. Falling back to Groq Handshake.");
+                if (sl && !sl.innerText.includes("Cloud")) updateStatusUI("Groq Fallback", "text-amber-500");
+            } else {
+                neuralTelemetry("Engine", "CRITICAL: No Neural Nodes linked. Check GitHub Secrets & deploy pipeline.");
+                updateStatusUI("No Keys Found", "text-rose-500");
             }
         }
     </script>
@@ -250,7 +250,7 @@
                     <div id="loadingState" class="hidden h-[300px] flex flex-col items-center justify-center">
                         <p id="loadingPhase" class="text-xs font-mono text-emerald-500 uppercase tracking-widest animate-pulse">Syncing Nodes...</p>
                     </div>
-                    <div id="contentState" class="hidden space-y-8 animate-in fade-in slide-in-from-bottom-4"></div>
+                    <div id="contentState" class="hidden space-y-8"></div>
                 </div>
             </div>
         </main>
@@ -258,7 +258,7 @@
 
     <script>
         let auditMode = 'url';
-        
+
         function setMode(m) {
             auditMode = m;
             document.getElementById('urlSection').classList.toggle('hidden', m !== 'url');
@@ -283,11 +283,11 @@
         async function startAudit() {
             const ld = document.getElementById('loadingState'), id = document.getElementById('idleState'), ct = document.getElementById('contentState'), ph = document.getElementById('loadingPhase');
             id.classList.add('hidden'); ct.classList.add('hidden'); ld.classList.remove('hidden');
-            
+
             try {
                 const keys = window.SAFESHIP_CONTEXT.sessionKeys;
-                if (!keys.gemini && !keys.groq) throw new Error("No Neural Node online. Verify Secrets.");
-                
+                if (!keys.gemini && !keys.groq) throw new Error("No Neural Node online. Check GitHub Secrets or deploy pipeline logs.");
+
                 let targetLabel, prompt;
                 if (auditMode === 'url') {
                     const u = document.getElementById('urlInput').value.trim(); if(!u) throw new Error("URL Required");
@@ -305,7 +305,7 @@
                 await window.saveAuditToCloud(data);
                 renderResults(data);
             } catch (err) {
-                neuralTelemetry("Error", err.message);
+                window.neuralTelemetry("Error", err.message);
                 ld.classList.add('hidden'); id.classList.remove('hidden');
                 alert(err.message);
             }
@@ -315,22 +315,19 @@
             const keys = window.SAFESHIP_CONTEXT.sessionKeys;
             const fullPrompt = prompt + "\nRespond ONLY in valid JSON: {score: number, summary: string, findings: [{title: string, severity: string, description: string, location: string, fix: string}]}";
 
-            // Priority 1: Gemini
             if (keys.gemini) {
                 try {
-                    neuralTelemetry("Engine", "Initiating Gemini Trace...");
+                    window.neuralTelemetry("Engine", "Initiating Gemini Trace...");
                     return await callGeminiAPI(keys.gemini, fullPrompt);
                 } catch (e) {
                     if (keys.groq) {
-                        neuralTelemetry("Engine", "Gemini Node Failure. Switching to Groq Fallback...");
+                        window.neuralTelemetry("Engine", "Gemini Node Failure. Switching to Groq Fallback...");
                         return await callGroqAPI(keys.groq, fullPrompt);
                     }
                     throw e;
                 }
-            } 
-            // Priority 2: Groq Fallback
-            else if (keys.groq) {
-                neuralTelemetry("Engine", "Using Groq Fallback Node.");
+            } else if (keys.groq) {
+                window.neuralTelemetry("Engine", "Using Groq Fallback Node.");
                 return await callGroqAPI(keys.groq, fullPrompt);
             }
             throw new Error("Handshake Failed: No valid API keys.");
@@ -340,12 +337,16 @@
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`;
             const res = await fetch(url, {
                 method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ parts: [{ text: prompt }] }],
                     generationConfig: { responseMimeType: "application/json" }
                 })
             });
-            if (!res.ok) throw new Error("Gemini Service Error");
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Gemini Service Error ${res.status}: ${errText}`);
+            }
             const data = await res.json();
             return JSON.parse(data.candidates[0].content.parts[0].text);
         }
@@ -364,7 +365,10 @@
                     response_format: { type: "json_object" }
                 })
             });
-            if (!res.ok) throw new Error("Groq Service Error");
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Groq Service Error ${res.status}: ${errText}`);
+            }
             const data = await res.json();
             return JSON.parse(data.choices[0].message.content);
         }
