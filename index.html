@@ -18,14 +18,16 @@
             console.log(`%c[NEURAL] [${time}] [${component}] %c${message}`, "color: #10b981; font-weight: bold;", "color: #a1a1aa;", data || "");
         };
 
-        // Resolution: Priority 1: Global Env variable (Canvas) | Priority 2: Injected Placeholder (GitHub)
+        // Resolution: Higher priority to environment variables for Canvas preview
         const resolveSecret = (injected, envVar) => {
-            if (envVar && envVar !== "") return envVar;
-            if (injected && !injected.startsWith("__") && injected !== "" && injected !== "{}") return injected;
+            // Environment variable check
+            if (typeof envVar !== 'undefined' && envVar && envVar !== "") return envVar;
+            // Placeholder check (for GitHub Pages injection)
+            if (injected && typeof injected === 'string' && !injected.startsWith("__") && injected !== "" && injected !== "{}") return injected;
             return null;
         };
 
-        const currentGeminiKey = resolveSecret("AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA", typeof apiKey !== 'undefined' ? apiKey : "");
+        const getGeminiKey = () => resolveSecret("AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA", typeof apiKey !== 'undefined' ? apiKey : "");
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'safeship-trace-v6';
 
         window.SAFESHIP_CONTEXT = {
@@ -33,7 +35,7 @@
             appId: appId,
             user: null, history: [], currentFiles: [],
             sessionKeys: { 
-                gemini: currentGeminiKey,
+                gemini: getGeminiKey(),
                 groq: resolveSecret("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", null)
             }
         };
@@ -77,17 +79,17 @@
                     onAuthStateChanged(auth, (user) => {
                         window.SAFESHIP_CONTEXT.user = user;
                         const uidEl = document.getElementById('userIdText');
-                        if (uidEl) uidEl.innerText = user ? user.uid : "Disconnected";
+                        if (uidEl) uidEl.innerText = user ? user.uid : "Connecting...";
                         
                         if (user) {
                             updateStatusUI("Cloud Linked", "text-emerald-500");
                             loadHistory(user.uid);
                         } else {
-                            updateStatusUI("Connecting...", "text-zinc-500");
+                            updateStatusUI("Authenticating", "text-zinc-500");
                         }
                     });
                     
-                    // Trigger Auth
+                    // Trigger Auth Node
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                         await signInWithCustomToken(auth, __initial_auth_token);
                     } else { 
@@ -99,8 +101,8 @@
                     updateStatusUI("Offline", "text-rose-500");
                 }
             } else {
-                neuralTelemetry("Persistence", "STANDALONE MODE: Using local session only.");
-                updateStatusUI("Offline", "text-zinc-500");
+                neuralTelemetry("Persistence", "STANDALONE MODE: Local session only.");
+                updateStatusUI("Standalone", "text-zinc-500");
             }
         };
 
@@ -116,6 +118,8 @@
                     sp.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
                 } else if (label.includes("Offline")) {
                     sp.className = "w-2 h-2 rounded-full bg-rose-500";
+                } else if (label.includes("Standalone")) {
+                    sp.className = "w-2 h-2 rounded-full bg-zinc-600";
                 } else {
                     sp.className = "w-2 h-2 rounded-full bg-zinc-700";
                 }
@@ -159,11 +163,21 @@
         };
 
         function autoConfigureNodes() {
-            const hasGemini = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
-            if (hasGemini) {
-                neuralTelemetry("Engine", "Neural Core Handshake Success.");
-            } else {
-                neuralTelemetry("Engine", "CRITICAL: Gemini Key missing from environment.");
+            // Attempt key resolution with a slight delay if not found immediately
+            const checkKey = () => {
+                const key = getGeminiKey();
+                window.SAFESHIP_CONTEXT.sessionKeys.gemini = key;
+                if (key) {
+                    neuralTelemetry("Engine", "Neural Core Handshake Success.");
+                    updateStatusUI("Neural Linked", "text-emerald-500");
+                } else {
+                    neuralTelemetry("Engine", "CRITICAL: Gemini Key missing from environment.");
+                }
+            };
+
+            checkKey();
+            if (!window.SAFESHIP_CONTEXT.sessionKeys.gemini) {
+                setTimeout(checkKey, 1000); // Retry once after 1s
             }
         }
     </script>
