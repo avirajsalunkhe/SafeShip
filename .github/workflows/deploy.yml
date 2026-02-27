@@ -29,17 +29,23 @@ jobs:
             import json
 
             filename = 'index.html'
+            if not os.path.exists(filename):
+                print(f"[!] CRITICAL: {filename} not found in root directory.")
+                sys.exit(1)
+
             with open(filename, 'r', encoding='utf-8') as f:
                 content = f.read()
 
+            # Mapping GitHub Secrets to internal placeholders
             replacements = {
-                '__GEMINI_API_KEY__': os.environ.get('GEMINI_KEY', ''),
-                '__GROQ_API_KEY__': os.environ.get('GROQ_KEY', ''),
-                '__FIREBASE_CONFIG_JSON__': os.environ.get('FB_CONFIG', '{}')
+                '__GEMINI_API_KEY__': os.environ.get('GEMINI_API_KEY', ''),
+                '__GROQ_API_KEY__': os.environ.get('GROQ_API_KEY', ''),
+                '__FIREBASE_CONFIG_JSON__': os.environ.get('FIREBASE_CONFIG', '{}')
             }
 
             failed_injection = False
             for placeholder, value in replacements.items():
+                # Check if secret exists
                 if not value or value.strip() == "" or value == "{}":
                     print(f"[!] TELEMETRY ALERT: Secret for {placeholder} is missing in GitHub Repository Settings.")
                     failed_injection = True
@@ -47,13 +53,23 @@ jobs:
                 
                 # Critical validation for Firebase JSON format
                 if placeholder == '__FIREBASE_CONFIG_JSON__':
+                    # Strip potential whitespace or hidden characters
+                    clean_value = value.strip()
                     try:
-                        json.loads(value)
+                        json.loads(clean_value)
                         print("[*] TELEMETRY: FIREBASE_CONFIG validated as valid JSON.")
                     except ValueError as e:
                         print(f"[!] CRITICAL ERROR: FIREBASE_CONFIG is NOT valid JSON.")
                         print(f"[DEBUG]: {str(e)}")
-                        print("[HINT]: Use double quotes for all keys and strings. No trailing commas.")
+                        
+                        # Automated format diagnostic
+                        if "'" in clean_value:
+                            print("[ADVISORY]: Found single quotes ('). JSON requires double quotes (\").")
+                        if "firebaseConfig" in clean_value or "=" in clean_value:
+                            print("[ADVISORY]: Found variable assignment. Ensure your secret contains ONLY the { ... } object.")
+                        if clean_value.endswith(","):
+                            print("[ADVISORY]: Found trailing comma at end of object.")
+                            
                         failed_injection = True
                 
                 print(f"[*] TELEMETRY: Prepared injection for {placeholder}.")
