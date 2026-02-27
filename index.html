@@ -18,45 +18,43 @@
             console.log(`%c[NEURAL] [${time}] [${component}] %c${message}`, "color: #10b981; font-weight: bold;", "color: #a1a1aa;", data || "");
         };
 
-        // Resolution: Higher priority to environment variables for Canvas preview
-        const resolveSecret = (injected, envVar) => {
-            // Environment variable check
-            if (typeof envVar !== 'undefined' && envVar && envVar !== "") return envVar;
-            // Placeholder check (for GitHub Pages injection)
-            if (injected && typeof injected === 'string' && !injected.startsWith("__") && injected !== "" && injected !== "{}") return injected;
+        // Resolution: Priorities Environment > Injected Secret
+        const getGeminiKey = () => {
+            // Check for global apiKey (environment injection)
+            if (typeof apiKey !== 'undefined' && apiKey && apiKey !== "") return apiKey;
+            
+            // Check for injected placeholder (GitHub Actions)
+            const placeholder = "__GEMINI_API_KEY__";
+            if (placeholder && !placeholder.startsWith("__") && placeholder !== "") return placeholder;
+            
             return null;
         };
 
-        const getGeminiKey = () => resolveSecret("__GEMINI_API_KEY__", typeof apiKey !== 'undefined' ? apiKey : "");
+        const getFirebaseConfig = () => {
+            // Priority 1: Environment provided config (Canvas/Preview)
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                return typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
+            }
+            // Priority 2: Injected placeholder (GitHub Actions)
+            const placeholder = '__FIREBASE_CONFIG_JSON__';
+            if (placeholder && !placeholder.startsWith("__") && placeholder !== "" && placeholder !== "{}") {
+                return JSON.parse(placeholder);
+            }
+            return null;
+        };
+
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'safeship-trace-v6';
 
         window.SAFESHIP_CONTEXT = {
             db: null, auth: null,
             appId: appId,
             user: null, history: [], currentFiles: [],
-            sessionKeys: { 
-                gemini: getGeminiKey(),
-                groq: resolveSecret("__GROQ_API_KEY__", null)
-            }
+            sessionKeys: { gemini: getGeminiKey() }
         };
 
         // --- FIREBASE INITIALIZATION ---
         const initFirebase = async () => {
-            let config = null;
-            const injectedConfig = '__FIREBASE_CONFIG_JSON__';
-
-            try {
-                // Priority 1: Environment provided config (Canvas/Preview)
-                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                    config = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
-                } 
-                // Priority 2: GitHub Action injected secret
-                else if (resolveSecret(injectedConfig, null)) {
-                    config = JSON.parse(injectedConfig);
-                }
-            } catch (e) {
-                neuralTelemetry("Handshake", "Configuration parsing failed.", e);
-            }
+            const config = getFirebaseConfig();
 
             if (config && config.apiKey) {
                 try {
@@ -76,12 +74,11 @@
                         if (user) {
                             updateStatusUI("Cloud Linked", "text-emerald-500");
                             loadHistory(user.uid);
-                        } else {
-                            updateStatusUI("Authenticating", "text-zinc-500");
                         }
                     });
                     
-                    // Trigger Auth Node
+                    // Trigger Auth
+                    updateStatusUI("Connecting Node", "text-zinc-500");
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                         await signInWithCustomToken(auth, __initial_auth_token);
                     } else { 
@@ -90,11 +87,11 @@
                     neuralTelemetry("Persistence", "Uplink Established.");
                 } catch (e) {
                     neuralTelemetry("Firebase", "Initialization Error", e);
-                    updateStatusUI("Offline", "text-rose-500");
+                    updateStatusUI("Persistence Offline", "text-rose-500");
                 }
             } else {
                 neuralTelemetry("Persistence", "STANDALONE MODE: Local session only.");
-                updateStatusUI("Standalone", "text-zinc-500");
+                updateStatusUI("Standalone Mode", "text-zinc-500");
             }
         };
 
@@ -108,10 +105,8 @@
             if (sp) {
                 if (label.includes("Linked")) {
                     sp.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
-                } else if (label.includes("Offline")) {
+                } else if (label.includes("Offline") || label.includes("Error")) {
                     sp.className = "w-2 h-2 rounded-full bg-rose-500";
-                } else if (label.includes("Standalone")) {
-                    sp.className = "w-2 h-2 rounded-full bg-zinc-600";
                 } else {
                     sp.className = "w-2 h-2 rounded-full bg-zinc-700";
                 }
@@ -127,7 +122,7 @@
                 window.SAFESHIP_CONTEXT.history = audits;
                 renderHistory();
             }, (err) => {
-                neuralTelemetry("History", "Access restricted.", err);
+                neuralTelemetry("History", "Access restricted. Verify Firestore rules.", err);
             });
         }
 
@@ -138,14 +133,14 @@
                 await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'audits'), {
                     ...auditData, timestamp: serverTimestamp()
                 });
-            } catch(e) { console.error("Save error", e); }
+            } catch(e) { neuralTelemetry("Storage", "Write Error", e); }
         };
 
         window.deleteAudit = async (auditId) => {
             const { db, user, appId } = window.SAFESHIP_CONTEXT;
             if (!db || !user) return;
             try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'audits', auditId)); } 
-            catch (e) { console.error("Delete error", e); }
+            catch (e) { neuralTelemetry("Storage", "Delete Error", e); }
         };
 
         window.onload = () => {
@@ -155,21 +150,25 @@
         };
 
         function autoConfigureNodes() {
-            // Attempt key resolution with a slight delay if not found immediately
             const checkKey = () => {
                 const key = getGeminiKey();
                 window.SAFESHIP_CONTEXT.sessionKeys.gemini = key;
                 if (key) {
                     neuralTelemetry("Engine", "Neural Core Handshake Success.");
-                    updateStatusUI("Neural Linked", "text-emerald-500");
+                    // Only update UI if we aren't already cloud linked
+                    const sl = document.getElementById('statusLabel');
+                    if (sl && !sl.innerText.includes("Cloud")) {
+                        updateStatusUI("Neural Active", "text-emerald-500");
+                    }
                 } else {
                     neuralTelemetry("Engine", "CRITICAL: Gemini Key missing from environment.");
                 }
             };
 
+            // Canvas environment key injection can sometimes take a millisecond
             checkKey();
             if (!window.SAFESHIP_CONTEXT.sessionKeys.gemini) {
-                setTimeout(checkKey, 1000); // Retry once after 1s
+                setTimeout(checkKey, 500);
             }
         }
     </script>
