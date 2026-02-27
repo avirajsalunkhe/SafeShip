@@ -3,413 +3,940 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SafeShip | Neural Trace Engine v6.2.4</title>
+    <title>SafeShip | Neural Trace Engine v7.0</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <!--
-    ╔══════════════════════════════════════════════════════════════╗
-    ║  INJECTED BY DEPLOY PIPELINE — DO NOT EDIT THESE LINES      ║
-    ║  These are replaced at build time by deploy.yml              ║
-    ╚══════════════════════════════════════════════════════════════╝
-    -->
     <script>
-        // These values are injected by the GitHub Actions deploy pipeline.
-        // The placeholders below are replaced with real secret values during build.
-        // They are plain JS variables so the module script below can read them.
         var INJECTED_GEMINI_KEY = "__GEMINI_API_KEY__";
         var INJECTED_GROQ_KEY   = "__GROQ_API_KEY__";
         var INJECTED_FIREBASE   = __FIREBASE_CONFIG_JSON__;
     </script>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // --- INTERNAL TELEMETRY ---
-        window.neuralTelemetry = (component, message, data = null) => {
-            const time = new Date().toLocaleTimeString();
-            console.log(`%c[NEURAL] [${time}] [${component}] %c${message}`, "color: #10b981; font-weight: bold;", "color: #a1a1aa;", data || "");
-        };
-
-        // ── KEY RESOLUTION ─────────────────────────────────────────────────────
-        // The deploy.yml pipeline replaces the __PLACEHOLDER__ strings inside the
-        // INJECTED_* variables above with real secret values.
-        // We check: if the value still looks like a placeholder → key not injected.
-        // String keys: valid if not empty and not still a placeholder
-        const isInjected = (val) => typeof val === 'string' && val !== "" && !val.startsWith("__") && !val.endsWith("__");
-
-        const getGeminiKey = () => isInjected(window.INJECTED_GEMINI_KEY) ? window.INJECTED_GEMINI_KEY : null;
-        const getGroqKey   = () => isInjected(window.INJECTED_GROQ_KEY)   ? window.INJECTED_GROQ_KEY   : null;
-
-        const getFirebaseConfig = () => {
-            const raw = window.INJECTED_FIREBASE;
-            // After deploy injection, INJECTED_FIREBASE is a JS object literal (no quotes).
-            // Before injection (local/raw), it is the placeholder string "__FIREBASE_CONFIG_JSON__".
-            if (!raw || typeof raw === 'string') return null;  // still a placeholder string → not injected
-            if (typeof raw === 'object' && raw.apiKey) return raw;
-            return null;
-        };
-        // ───────────────────────────────────────────────────────────────────────
-
-        const appId = 'safeship-trace-v6';
-
-        window.SAFESHIP_CONTEXT = {
-            db: null, auth: null,
-            appId: appId,
-            user: null, history: [], currentFiles: [],
-            sessionKeys: {
-                gemini: getGeminiKey(),
-                groq:   getGroqKey()
-            }
-        };
-
-        // --- FIREBASE INITIALIZATION ---
-        const initFirebase = async () => {
-            const config = getFirebaseConfig();
-
-            if (config && config.apiKey) {
-                try {
-                    const app  = initializeApp(config);
-                    const auth = getAuth(app);
-                    const db   = getFirestore(app);
-
-                    window.SAFESHIP_CONTEXT.auth = auth;
-                    window.SAFESHIP_CONTEXT.db   = db;
-
-                    onAuthStateChanged(auth, (user) => {
-                        window.SAFESHIP_CONTEXT.user = user;
-                        const uidEl = document.getElementById('userIdText');
-                        if (uidEl) uidEl.innerText = user ? user.uid : "Connecting...";
-                        if (user) {
-                            updateStatusUI("Cloud Linked", "text-emerald-500");
-                            loadHistory(user.uid);
-                        }
-                    });
-
-                    updateStatusUI("Connecting Node", "text-zinc-500");
-                    await signInAnonymously(auth);
-                    neuralTelemetry("Persistence", "Uplink Established.");
-                } catch (e) {
-                    neuralTelemetry("Firebase", "Initialization Error", e);
-                    updateStatusUI("Persistence Offline", "text-rose-500");
-                }
-            } else {
-                neuralTelemetry("Persistence", "STANDALONE MODE: Local session only.");
-                updateStatusUI("Standalone Mode", "text-zinc-500");
-            }
-        };
-
-        function updateStatusUI(label, colorClass) {
-            const sl = document.getElementById('statusLabel');
-            const sp = document.getElementById('statusPulse');
-            if (sl) {
-                sl.innerText = label;
-                sl.className = `text-[10px] font-black uppercase tracking-widest ${colorClass}`;
-            }
-            if (sp) {
-                if (label.includes("Linked") || label.includes("Active")) {
-                    sp.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
-                } else if (label.includes("Fallback")) {
-                    sp.className = "w-2 h-2 rounded-full bg-amber-500 animate-pulse";
-                } else if (label.includes("Offline") || label.includes("Error")) {
-                    sp.className = "w-2 h-2 rounded-full bg-rose-500";
-                } else {
-                    sp.className = "w-2 h-2 rounded-full bg-zinc-700";
-                }
-            }
-        }
-
-        function loadHistory(userId) {
-            const { db, appId } = window.SAFESHIP_CONTEXT;
-            if (!db) return;
-            onSnapshot(collection(db, 'artifacts', appId, 'users', userId, 'audits'), (snap) => {
-                const audits = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-                    .sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
-                window.SAFESHIP_CONTEXT.history = audits;
-                renderHistory();
-            }, (err) => {
-                neuralTelemetry("History", "Access restricted. Verify Firestore rules.", err);
-            });
-        }
-
-        window.saveAuditToCloud = async (auditData) => {
-            const { db, user, appId } = window.SAFESHIP_CONTEXT;
-            if (!db || !user) return;
-            try {
-                await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'audits'), {
-                    ...auditData, timestamp: serverTimestamp()
-                });
-            } catch(e) { neuralTelemetry("Storage", "Write Error", e); }
-        };
-
-        window.deleteAudit = async (auditId) => {
-            const { db, user, appId } = window.SAFESHIP_CONTEXT;
-            if (!db || !user) return;
-            try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'audits', auditId)); }
-            catch (e) { neuralTelemetry("Storage", "Delete Error", e); }
-        };
-
-        window.onload = () => {
-            lucide.createIcons();
-            initFirebase();
-            autoConfigureNodes();
-        };
-
-        function autoConfigureNodes() {
-            const gemini = getGeminiKey();
-            const groq   = getGroqKey();
-            window.SAFESHIP_CONTEXT.sessionKeys.gemini = gemini;
-            window.SAFESHIP_CONTEXT.sessionKeys.groq   = groq;
-
-            const sl = document.getElementById('statusLabel');
-            if (gemini) {
-                neuralTelemetry("Engine", "Gemini Node Handshake Success.");
-                if (sl && !sl.innerText.includes("Cloud")) updateStatusUI("Neural Active", "text-emerald-500");
-            } else if (groq) {
-                neuralTelemetry("Engine", "Gemini Node Missing. Falling back to Groq Handshake.");
-                if (sl && !sl.innerText.includes("Cloud")) updateStatusUI("Groq Fallback", "text-amber-500");
-            } else {
-                neuralTelemetry("Engine", "CRITICAL: No Neural Nodes linked. Check GitHub Secrets & deploy pipeline.");
-                updateStatusUI("No Keys Found", "text-rose-500");
-            }
-        }
-    </script>
-
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
-        body { font-family: 'Space Grotesk', sans-serif; background-color: #020203; color: #f4f4f5; }
-        .font-mono { font-family: 'JetBrains Mono', monospace; }
-        .neon-glow { box-shadow: 0 0 20px rgba(16, 185, 129, 0.1); }
-        .scanline::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, transparent, rgba(16, 185, 129, 0.03), transparent); animation: scan 4s linear infinite; pointer-events: none; }
-        @keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #080909;
+            --surface: #0f1010;
+            --border: #1e2020;
+            --border-bright: #2a2d2d;
+            --text: #e8eaea;
+            --muted: #5a6060;
+            --accent: #00ff88;
+            --accent-dim: rgba(0,255,136,0.08);
+            --accent-border: rgba(0,255,136,0.2);
+            --warn: #ffb800;
+            --danger: #ff3b3b;
+            --info: #3b9eff;
+            --font-display: 'Syne', sans-serif;
+            --font-mono: 'IBM Plex Mono', monospace;
+        }
+        html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-display); overflow: hidden; }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+        .mono { font-family: var(--font-mono); }
+
+        /* Layout */
+        #app { display: flex; height: 100vh; }
+        #sidebar { width: 260px; min-width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+        #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        #topbar { height: 56px; min-height: 56px; background: rgba(8,9,9,0.9); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; backdrop-filter: blur(12px); }
+        #content { flex: 1; overflow-y: auto; padding: 32px; }
+
+        /* Sidebar */
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
+        .logo { display: flex; align-items: center; gap: 10px; }
+        .logo-icon { width: 32px; height: 32px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .logo-icon svg { color: #000; width: 18px; height: 18px; }
+        .logo-text { font-size: 15px; font-weight: 800; letter-spacing: -0.5px; }
+        .logo-version { font-family: var(--font-mono); font-size: 9px; color: var(--accent); letter-spacing: 1px; margin-top: 1px; }
+
+        .sidebar-nav { padding: 8px; border-bottom: 1px solid var(--border); }
+        .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; color: var(--muted); transition: all 0.15s; border: 1px solid transparent; }
+        .nav-item:hover { background: var(--accent-dim); color: var(--text); }
+        .nav-item.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-border); }
+        .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+        .nav-badge { margin-left: auto; font-family: var(--font-mono); font-size: 9px; padding: 2px 6px; border-radius: 4px; background: var(--border); color: var(--muted); }
+        .nav-badge.new { background: rgba(0,255,136,0.15); color: var(--accent); }
+
+        .sidebar-section-title { font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px; color: var(--muted); padding: 16px 20px 8px; text-transform: uppercase; }
+        .history-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+        .history-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: all 0.15s; position: relative; margin-bottom: 4px; }
+        .history-item:hover { background: var(--accent-dim); border-color: var(--accent-border); }
+        .history-score { font-family: var(--font-mono); font-size: 11px; font-weight: 700; }
+        .history-target { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+        .history-date { font-family: var(--font-mono); font-size: 9px; color: var(--muted); }
+        .history-delete { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); opacity: 0; transition: opacity 0.15s; color: var(--danger); cursor: pointer; }
+        .history-item:hover .history-delete { opacity: 1; }
+
+        .sidebar-footer { padding: 12px; border-top: 1px solid var(--border); }
+        .node-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; }
+        .node-avatar { width: 28px; height: 28px; background: var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .node-id { font-family: var(--font-mono); font-size: 9px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 140px; }
+
+        /* Topbar */
+        .tabs { display: flex; gap: 4px; }
+        .tab-btn { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 6px 14px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; background: transparent; color: var(--muted); transition: all 0.15s; text-transform: uppercase; }
+        .tab-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-border); }
+        .tab-btn:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.04); }
+
+        .status-pill { display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface); }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-bright); }
+        .status-dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse-dot 2s infinite; }
+        .status-dot.warn { background: var(--warn); }
+        .status-dot.error { background: var(--danger); }
+        @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .status-label { font-family: var(--font-mono); font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+
+        /* Cards & Forms */
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; }
+        .section-title { font-size: 28px; font-weight: 800; letter-spacing: -1px; line-height: 1.1; margin-bottom: 20px; }
+        .section-title span { color: var(--accent); }
+
+        .input-row { display: flex; gap: 10px; }
+        .text-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-family: var(--font-mono); font-size: 13px; color: var(--text); outline: none; transition: border-color 0.15s; }
+        .text-input:focus { border-color: var(--accent-border); }
+        .text-input::placeholder { color: var(--muted); }
+
+        .btn-primary { background: var(--accent); color: #000; font-family: var(--font-display); font-weight: 800; font-size: 12px; letter-spacing: 1px; padding: 12px 24px; border-radius: 10px; border: none; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+        .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+        .btn-primary:active { transform: translateY(0); }
+        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); font-family: var(--font-display); font-weight: 700; font-size: 11px; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
+        .btn-ghost:hover { color: var(--text); border-color: var(--border-bright); }
+
+        /* Language selector */
+        .lang-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+        .lang-chip { font-family: var(--font-mono); font-size: 10px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted); cursor: pointer; transition: all 0.15s; background: transparent; }
+        .lang-chip:hover { border-color: var(--accent-border); color: var(--text); }
+        .lang-chip.active { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
+
+        /* Check categories */
+        .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-bottom: 20px; }
+        .check-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; font-size: 11px; font-weight: 700; color: var(--muted); background: transparent; user-select: none; }
+        .check-chip:hover { border-color: var(--accent-border); color: var(--text); }
+        .check-chip.active { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
+        .check-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-bright); flex-shrink: 0; transition: background 0.15s; }
+        .check-chip.active .dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+
+        /* Drop zone */
+        .dropzone { border: 2px dashed var(--border); border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; position: relative; }
+        .dropzone:hover, .dropzone.drag-over { border-color: var(--accent-border); background: var(--accent-dim); }
+        .dropzone-icon { color: var(--muted); margin: 0 auto 12px; display: block; }
+        .dropzone-text { font-size: 13px; font-weight: 700; color: var(--muted); }
+        .dropzone-sub { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-top: 4px; opacity: 0.7; }
+        .file-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+        .file-chip { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+
+        /* Code input textarea */
+        .code-textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text); outline: none; resize: vertical; min-height: 160px; transition: border-color 0.15s; line-height: 1.6; }
+        .code-textarea:focus { border-color: var(--accent-border); }
+        .code-textarea::placeholder { color: var(--muted); }
+
+        /* Loading */
+        #loadingState { display: none; flex-direction: column; align-items: center; justify-content: center; height: 320px; gap: 20px; }
+        .spinner { width: 40px; height: 40px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-phase { font-family: var(--font-mono); font-size: 11px; color: var(--accent); letter-spacing: 2px; animation: blink 1.5s ease-in-out infinite; }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .loading-steps { display: flex; flex-direction: column; gap: 6px; width: 280px; }
+        .loading-step { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+        .loading-step.done { color: var(--accent); }
+        .loading-step.active { color: var(--text); }
+        .step-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+        .loading-step.done .step-dot { background: var(--accent); }
+        .loading-step.active .step-dot { background: var(--text); animation: pulse-dot 1s infinite; }
+
+        /* Results */
+        .score-ring-wrap { position: relative; width: 100px; height: 100px; flex-shrink: 0; }
+        .score-ring-wrap svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+        .score-number { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .score-num { font-size: 26px; font-weight: 800; letter-spacing: -2px; line-height: 1; }
+        .score-pct { font-family: var(--font-mono); font-size: 9px; color: var(--muted); }
+        .score-header { display: flex; align-items: center; gap: 24px; margin-bottom: 20px; }
+        .score-meta { flex: 1; }
+        .score-label { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
+        .score-grade { font-size: 22px; font-weight: 800; }
+        .score-summary { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 4px; }
+
+        .findings-header { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .findings-header span { background: var(--border); border-radius: 4px; padding: 2px 8px; color: var(--text); }
+
+        .finding-card { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 10px; transition: border-color 0.15s; }
+        .finding-card:hover { border-color: var(--border-bright); }
+        .finding-card.severity-critical { border-left: 3px solid var(--danger); }
+        .finding-card.severity-high { border-left: 3px solid #ff7b3b; }
+        .finding-card.severity-medium { border-left: 3px solid var(--warn); }
+        .finding-card.severity-low { border-left: 3px solid var(--info); }
+        .finding-card.severity-info { border-left: 3px solid var(--muted); }
+        .finding-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 14px 16px 0; gap: 12px; cursor: pointer; }
+        .finding-title { font-size: 13px; font-weight: 700; }
+        .finding-body { padding: 0 16px 14px; margin-top: 10px; }
+        .finding-location { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-bottom: 8px; }
+        .finding-desc { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 12px; }
+        .finding-fix { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+        .fix-label { font-family: var(--font-mono); font-size: 9px; color: var(--accent); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px; }
+        .fix-code { font-family: var(--font-mono); font-size: 11px; color: #a8d8b0; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+
+        .severity-badge { font-family: var(--font-mono); font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 4px; white-space: nowrap; letter-spacing: 1px; flex-shrink: 0; }
+        .badge-critical { background: rgba(255,59,59,0.15); color: var(--danger); }
+        .badge-high { background: rgba(255,123,59,0.15); color: #ff7b3b; }
+        .badge-medium { background: rgba(255,184,0,0.15); color: var(--warn); }
+        .badge-low { background: rgba(59,158,255,0.15); color: var(--info); }
+        .badge-info { background: rgba(90,96,96,0.2); color: var(--muted); }
+
+        .stats-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+        .stat-box { flex: 1; min-width: 80px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
+        .stat-num { font-size: 22px; font-weight: 800; letter-spacing: -1px; }
+        .stat-lbl { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; margin-top: 2px; }
+
+        /* Filter bar */
+        .filter-bar { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+        .filter-btn { font-family: var(--font-mono); font-size: 9px; font-weight: 700; padding: 4px 10px; border-radius: 5px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; transition: all 0.15s; letter-spacing: 1px; text-transform: uppercase; }
+        .filter-btn.active { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
+        .filter-count { font-family: var(--font-mono); font-size: 9px; color: var(--muted); margin-left: auto; }
+
+        /* Export bar */
+        .export-bar { display: flex; gap: 8px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+
+        /* Idle */
+        #idleState { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 280px; border: 1px dashed var(--border); border-radius: 16px; color: var(--muted); }
+        .idle-icon { color: var(--border-bright); margin-bottom: 12px; }
+
+        /* Tooltip */
+        [data-tip] { position: relative; }
+        [data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #1a1d1d; border: 1px solid var(--border); color: var(--text); font-family: var(--font-mono); font-size: 10px; padding: 5px 10px; border-radius: 6px; white-space: nowrap; z-index: 100; pointer-events: none; }
+
+        /* Animations */
+        .fade-in { animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Collapsed finding body */
+        .finding-body { display: none; }
+        .finding-card.expanded .finding-body { display: block; }
+        .finding-toggle { color: var(--muted); transition: transform 0.2s; flex-shrink: 0; margin-top: 2px; }
+        .finding-card.expanded .finding-toggle { transform: rotate(180deg); }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            #sidebar { display: none; }
+            #content { padding: 16px; }
+        }
     </style>
 </head>
-<body class="selection:bg-emerald-500/30">
-    <div class="flex h-screen overflow-hidden">
-        <!-- Sidebar -->
-        <aside class="w-72 border-r border-zinc-800/50 bg-black/40 flex flex-col z-50">
-            <div class="p-6 border-b border-zinc-800/50 flex items-center gap-3">
-                <div class="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center neon-glow"><i data-lucide="shield-check" class="w-5 h-5 text-black"></i></div>
-                <h1 class="text-lg font-bold">SafeShip <span class="text-emerald-500 text-sm">v6.2.4</span></h1>
-            </div>
-            <div class="flex-1 overflow-y-auto p-4 space-y-4">
-                <span class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2">History Traces</span>
-                <div id="historyContainer" class="space-y-2"></div>
-            </div>
-            <div class="p-4 border-t border-zinc-800/50">
-                <div class="flex items-center gap-3 p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
-                    <div class="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center"><i data-lucide="user" class="w-4 h-4 text-zinc-400"></i></div>
-                    <div class="flex flex-col"><span class="text-[10px] text-zinc-500 uppercase font-black">Node ID</span><span id="userIdText" class="text-[10px] font-mono text-emerald-500 truncate w-32 tracking-tighter">Connecting...</span></div>
+<body>
+
+<div id="app">
+    <!-- ── SIDEBAR ─────────────────────────────────────────────── -->
+    <aside id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon"><i data-lucide="shield-check"></i></div>
+                <div>
+                    <div class="logo-text">SafeShip</div>
+                    <div class="logo-version">NEURAL TRACE v7.0</div>
                 </div>
             </div>
-        </aside>
+        </div>
 
-        <!-- Main Content -->
-        <main class="flex-1 overflow-y-auto relative flex flex-col">
-            <nav class="h-16 border-b border-zinc-800/50 flex items-center justify-between px-8 bg-black/20 backdrop-blur-md sticky top-0 z-40">
-                <div class="flex gap-8">
-                    <button onclick="setMode('url')" id="tab-url" class="text-xs font-black uppercase tracking-widest text-emerald-500 border-b-2 border-emerald-500 h-16">URL Scan</button>
-                    <button onclick="setMode('code')" id="tab-code" class="text-xs font-black uppercase tracking-widest text-zinc-500 h-16">SAST Audit</button>
-                </div>
-                <div class="flex items-center gap-4">
-                    <div class="flex items-center gap-2 px-4 py-2 bg-zinc-900 rounded-xl border border-zinc-800">
-                        <div id="statusPulse" class="w-2 h-2 rounded-full bg-zinc-700"></div>
-                        <span id="statusLabel" class="text-[10px] font-black uppercase tracking-widest text-zinc-500">Node Standby</span>
-                    </div>
-                </div>
-            </nav>
+        <div class="sidebar-nav">
+            <div class="nav-item active" onclick="switchTab('url')" id="nav-url">
+                <i data-lucide="globe" style="width:15px;height:15px"></i> URL Probe
+            </div>
+            <div class="nav-item" onclick="switchTab('code')" id="nav-code">
+                <i data-lucide="file-code" style="width:15px;height:15px"></i> SAST Audit
+                <span class="nav-badge new">Multi-lang</span>
+            </div>
+            <div class="nav-item" onclick="switchTab('paste')" id="nav-paste">
+                <i data-lucide="clipboard" style="width:15px;height:15px"></i> Paste Code
+            </div>
+        </div>
 
-            <div class="p-8 max-w-5xl mx-auto w-full space-y-8">
-                <div id="urlSection" class="space-y-4">
-                    <h2 class="text-4xl font-bold tracking-tighter">Deep <span class="text-emerald-500">Live</span> Probe.</h2>
-                    <div class="flex gap-2">
-                        <input type="text" id="urlInput" placeholder="https://target-endpoint.com" class="flex-1 bg-zinc-900/50 border border-zinc-800 rounded-2xl py-4 px-6 text-sm outline-none focus:border-emerald-500/50">
-                        <button onclick="startAudit()" class="bg-emerald-500 text-black font-black px-8 rounded-2xl">INITIATE</button>
-                    </div>
-                </div>
+        <div class="sidebar-section-title">Trace History</div>
+        <div class="history-list" id="historyContainer">
+            <div style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:10px;color:var(--muted)">NO TRACES YET</div>
+        </div>
 
-                <div id="codeSection" class="hidden space-y-4">
-                    <h2 class="text-4xl font-bold tracking-tighter">Neural <span class="text-emerald-500">SAST</span>.</h2>
-                    <div class="border-2 border-dashed border-zinc-800 rounded-3xl p-12 text-center bg-zinc-900/10 cursor-pointer hover:bg-zinc-900/20" onclick="document.getElementById('fileInput').click()">
-                        <input type="file" id="fileInput" multiple class="hidden" onchange="handleFiles(event)">
-                        <i data-lucide="upload-cloud" class="w-8 h-8 mx-auto mb-4 text-zinc-700"></i>
-                        <p class="text-sm font-bold">Drop files or click to upload</p>
-                    </div>
-                    <div id="fileList" class="flex flex-wrap gap-2"></div>
-                    <button id="codeAuditBtn" onclick="startAudit()" class="w-full bg-white text-black font-black py-4 rounded-2xl disabled:opacity-50" disabled>ANALYZE LOGIC</button>
-                </div>
-
-                <div id="resultsArea">
-                    <div id="idleState" class="h-[300px] border border-zinc-800/30 rounded-[2.5rem] flex flex-col items-center justify-center bg-black/20 scanline relative overflow-hidden">
-                        <i data-lucide="activity" class="w-10 h-10 text-zinc-800 mb-4"></i>
-                        <p class="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Awaiting Signal</p>
-                    </div>
-                    <div id="loadingState" class="hidden h-[300px] flex flex-col items-center justify-center">
-                        <p id="loadingPhase" class="text-xs font-mono text-emerald-500 uppercase tracking-widest animate-pulse">Syncing Nodes...</p>
-                    </div>
-                    <div id="contentState" class="hidden space-y-8"></div>
+        <div class="sidebar-footer">
+            <div class="node-card">
+                <div class="node-avatar"><i data-lucide="user" style="width:14px;height:14px;color:var(--muted)"></i></div>
+                <div>
+                    <div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase">Node ID</div>
+                    <div class="node-id" id="userIdText">Connecting...</div>
                 </div>
             </div>
-        </main>
-    </div>
+        </div>
+    </aside>
 
-    <script>
-        let auditMode = 'url';
-
-        function setMode(m) {
-            auditMode = m;
-            document.getElementById('urlSection').classList.toggle('hidden', m !== 'url');
-            document.getElementById('codeSection').classList.toggle('hidden', m !== 'code');
-            document.getElementById('tab-url').className = m === 'url' ? "text-xs font-black uppercase tracking-widest text-emerald-500 border-b-2 border-emerald-500 h-16" : "text-xs font-black uppercase tracking-widest text-zinc-500 h-16";
-            document.getElementById('tab-code').className = m === 'code' ? "text-xs font-black uppercase tracking-widest text-emerald-500 border-b-2 border-emerald-500 h-16" : "text-xs font-black uppercase tracking-widest text-zinc-500 h-16";
-        }
-
-        function handleFiles(e) {
-            const files = Array.from(e.target.files), c = document.getElementById('fileList'); c.innerHTML = '';
-            window.SAFESHIP_CONTEXT.currentFiles = [];
-            files.forEach(file => {
-                const r = new FileReader(); r.onload = (ev) => {
-                    window.SAFESHIP_CONTEXT.currentFiles.push({ name: file.name, content: ev.target.result });
-                    const d = document.createElement('div'); d.className = "bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-[10px] flex items-center gap-2";
-                    d.innerHTML = `<i data-lucide="file-code" class="w-3 h-3 text-emerald-500"></i> ${file.name}`; c.appendChild(d);
-                    lucide.createIcons(); document.getElementById('codeAuditBtn').disabled = false;
-                }; r.readAsText(file);
-            });
-        }
-
-        async function startAudit() {
-            const ld = document.getElementById('loadingState'), id = document.getElementById('idleState'), ct = document.getElementById('contentState'), ph = document.getElementById('loadingPhase');
-            id.classList.add('hidden'); ct.classList.add('hidden'); ld.classList.remove('hidden');
-
-            try {
-                const keys = window.SAFESHIP_CONTEXT.sessionKeys;
-                if (!keys.gemini && !keys.groq) throw new Error("No Neural Node online. Check GitHub Secrets or deploy pipeline logs.");
-
-                let targetLabel, prompt;
-                if (auditMode === 'url') {
-                    const u = document.getElementById('urlInput').value.trim(); if(!u) throw new Error("URL Required");
-                    targetLabel = u;
-                    ph.innerText = "Intercepting headers...";
-                    prompt = `Conduct a security audit of this URL: ${u}`;
-                } else {
-                    targetLabel = "Repository Trace";
-                    ph.innerText = "Analyzing semantic flow...";
-                    prompt = "SAST Audit Report for these files:\n" + window.SAFESHIP_CONTEXT.currentFiles.map(f => `File: ${f.name}\n${f.content}`).join('\n\n');
-                }
-
-                const data = await callNeuralNode(prompt);
-                data.target = targetLabel;
-                await window.saveAuditToCloud(data);
-                renderResults(data);
-            } catch (err) {
-                window.neuralTelemetry("Error", err.message);
-                ld.classList.add('hidden'); id.classList.remove('hidden');
-                alert(err.message);
-            }
-        }
-
-        async function callNeuralNode(prompt) {
-            const keys = window.SAFESHIP_CONTEXT.sessionKeys;
-            const fullPrompt = prompt + "\nRespond ONLY in valid JSON: {score: number, summary: string, findings: [{title: string, severity: string, description: string, location: string, fix: string}]}";
-
-            if (keys.gemini) {
-                try {
-                    window.neuralTelemetry("Engine", "Initiating Gemini Trace...");
-                    return await callGeminiAPI(keys.gemini, fullPrompt);
-                } catch (e) {
-                    if (keys.groq) {
-                        window.neuralTelemetry("Engine", "Gemini Node Failure. Switching to Groq Fallback...");
-                        return await callGroqAPI(keys.groq, fullPrompt);
-                    }
-                    throw e;
-                }
-            } else if (keys.groq) {
-                window.neuralTelemetry("Engine", "Using Groq Fallback Node.");
-                return await callGroqAPI(keys.groq, fullPrompt);
-            }
-            throw new Error("Handshake Failed: No valid API keys.");
-        }
-
-        async function callGeminiAPI(key, prompt) {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`;
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { responseMimeType: "application/json" }
-                })
-            });
-            if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(`Gemini Service Error ${res.status}: ${errText}`);
-            }
-            const data = await res.json();
-            return JSON.parse(data.candidates[0].content.parts[0].text);
-        }
-
-        async function callGroqAPI(key, prompt) {
-            const url = "https://api.groq.com/openai/v1/chat/completions";
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${key}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    model: "llama-3.3-70b-versatile",
-                    messages: [{ role: "user", content: prompt }],
-                    response_format: { type: "json_object" }
-                })
-            });
-            if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(`Groq Service Error ${res.status}: ${errText}`);
-            }
-            const data = await res.json();
-            return JSON.parse(data.choices[0].message.content);
-        }
-
-        function renderResults(d) {
-            const ct = document.getElementById('contentState');
-            document.getElementById('loadingState').classList.add('hidden');
-            ct.classList.remove('hidden');
-            ct.innerHTML = `
-                <div class="flex justify-between items-end">
-                    <div><span class="text-[10px] font-black uppercase text-zinc-500 tracking-widest">Security Score</span><h3 class="text-6xl font-bold tracking-tighter">${d.score}%</h3></div>
-                    <button onclick="resetUI()" class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-white"><i data-lucide="refresh-cw"></i></button>
+    <!-- ── MAIN ───────────────────────────────────────────────── -->
+    <div id="main">
+        <div id="topbar">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('url')" id="tab-url">URL Probe</button>
+                <button class="tab-btn" onclick="switchTab('code')" id="tab-code">SAST Audit</button>
+                <button class="tab-btn" onclick="switchTab('paste')" id="tab-paste">Paste Code</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+                <div class="status-pill">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span class="status-label" id="statusLabel">Standby</span>
                 </div>
-                <div class="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-3xl text-sm text-zinc-400 leading-relaxed">${d.summary}</div>
-                <div class="space-y-4">${d.findings.map(f => `
-                    <div class="bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6">
-                        <div class="flex justify-between items-start mb-2"><h4 class="font-bold text-white">${f.title}</h4><span class="text-[10px] px-2 py-0.5 rounded bg-black border border-zinc-800 text-zinc-500 font-mono">${f.severity.toUpperCase()}</span></div>
-                        <p class="text-xs text-zinc-500 font-mono mb-2">${f.location}</p>
-                        <p class="text-sm text-zinc-400 mb-4">${f.description}</p>
-                        <div class="p-4 bg-black/60 rounded-xl border border-emerald-500/10">
-                            <p class="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-1">Recommended Fix</p>
-                            <code class="text-xs font-mono text-emerald-400 whitespace-pre-wrap">${f.fix}</code>
+            </div>
+        </div>
+
+        <div id="content">
+
+            <!-- URL PROBE TAB -->
+            <div id="tab-panel-url" class="tab-panel">
+                <div class="section-title">Deep <span>Live</span> Probe.</div>
+                <div class="card" style="margin-bottom:16px">
+                    <div class="input-row" style="margin-bottom:16px">
+                        <input type="text" class="text-input" id="urlInput" placeholder="https://target-endpoint.com/api/v1">
+                        <button class="btn-primary" onclick="startAudit('url')">INITIATE</button>
+                    </div>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:12px;letter-spacing:1px">SECURITY CHECKS</div>
+                    <div class="check-grid" id="urlChecks">
+                        <div class="check-chip active" data-check="xss"><span class="dot"></span>XSS Detection</div>
+                        <div class="check-chip active" data-check="sqli"><span class="dot"></span>SQL Injection</div>
+                        <div class="check-chip active" data-check="headers"><span class="dot"></span>HTTP Headers</div>
+                        <div class="check-chip active" data-check="csrf"><span class="dot"></span>CSRF Risks</div>
+                        <div class="check-chip active" data-check="ssl"><span class="dot"></span>SSL/TLS Config</div>
+                        <div class="check-chip active" data-check="cors"><span class="dot"></span>CORS Policy</div>
+                        <div class="check-chip active" data-check="auth"><span class="dot"></span>Auth Weaknesses</div>
+                        <div class="check-chip active" data-check="ratelimit"><span class="dot"></span>Rate Limiting</div>
+                        <div class="check-chip active" data-check="exposure"><span class="dot"></span>Data Exposure</div>
+                        <div class="check-chip active" data-check="dirtraversal"><span class="dot"></span>Path Traversal</div>
+                        <div class="check-chip active" data-check="ssrf"><span class="dot"></span>SSRF Vectors</div>
+                        <div class="check-chip active" data-check="idor"><span class="dot"></span>IDOR / BOLA</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SAST FILE AUDIT TAB -->
+            <div id="tab-panel-code" class="tab-panel" style="display:none">
+                <div class="section-title">Neural <span>SAST</span>.</div>
+                <div class="card" style="margin-bottom:16px">
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:10px;letter-spacing:1px">TARGET LANGUAGE</div>
+                    <div class="lang-grid" id="langGrid">
+                        <div class="lang-chip active" data-lang="auto">Auto Detect</div>
+                        <div class="lang-chip" data-lang="javascript">JavaScript</div>
+                        <div class="lang-chip" data-lang="typescript">TypeScript</div>
+                        <div class="lang-chip" data-lang="python">Python</div>
+                        <div class="lang-chip" data-lang="php">PHP</div>
+                        <div class="lang-chip" data-lang="java">Java</div>
+                        <div class="lang-chip" data-lang="csharp">C#</div>
+                        <div class="lang-chip" data-lang="go">Go</div>
+                        <div class="lang-chip" data-lang="ruby">Ruby</div>
+                        <div class="lang-chip" data-lang="rust">Rust</div>
+                        <div class="lang-chip" data-lang="kotlin">Kotlin</div>
+                        <div class="lang-chip" data-lang="swift">Swift</div>
+                        <div class="lang-chip" data-lang="cpp">C/C++</div>
+                        <div class="lang-chip" data-lang="solidity">Solidity</div>
+                        <div class="lang-chip" data-lang="shell">Shell/Bash</div>
+                        <div class="lang-chip" data-lang="sql">SQL</div>
+                    </div>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:10px;letter-spacing:1px">SAST CHECKS</div>
+                    <div class="check-grid" id="sastChecks">
+                        <div class="check-chip active" data-check="secrets"><span class="dot"></span>Hardcoded Secrets</div>
+                        <div class="check-chip active" data-check="injection"><span class="dot"></span>Injection Flaws</div>
+                        <div class="check-chip active" data-check="authz"><span class="dot"></span>Broken Auth</div>
+                        <div class="check-chip active" data-check="crypto"><span class="dot"></span>Weak Crypto</div>
+                        <div class="check-chip active" data-check="deser"><span class="dot"></span>Insecure Deser</div>
+                        <div class="check-chip active" data-check="xxe"><span class="dot"></span>XXE Injection</div>
+                        <div class="check-chip active" data-check="ssti"><span class="dot"></span>SSTI / Template</div>
+                        <div class="check-chip active" data-check="rce"><span class="dot"></span>RCE Vectors</div>
+                        <div class="check-chip active" data-check="supply"><span class="dot"></span>Supply Chain</div>
+                        <div class="check-chip active" data-check="overflow"><span class="dot"></span>Buffer Overflow</div>
+                        <div class="check-chip active" data-check="race"><span class="dot"></span>Race Conditions</div>
+                        <div class="check-chip active" data-check="logic"><span class="dot"></span>Logic Flaws</div>
+                    </div>
+                    <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragleave="this.classList.remove('drag-over')">
+                        <input type="file" id="fileInput" multiple style="display:none" onchange="handleFiles(event)">
+                        <i data-lucide="upload-cloud" class="dropzone-icon" style="width:32px;height:32px"></i>
+                        <div class="dropzone-text">Drop files or click to upload</div>
+                        <div class="dropzone-sub">JS · TS · PY · PHP · JAVA · CS · GO · RB · RS · KT · SOL · SH · SQL + more</div>
+                        <div class="file-chips" id="fileList"></div>
+                    </div>
+                    <button class="btn-primary" id="codeAuditBtn" onclick="startAudit('code')" style="margin-top:14px;width:100%" disabled>ANALYZE CODE</button>
+                </div>
+            </div>
+
+            <!-- PASTE CODE TAB -->
+            <div id="tab-panel-paste" class="tab-panel" style="display:none">
+                <div class="section-title">Paste & <span>Trace</span>.</div>
+                <div class="card" style="margin-bottom:16px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                        <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);letter-spacing:1px">LANGUAGE</div>
+                        <select id="pasteLang" class="text-input" style="width:160px;padding:5px 10px;font-size:11px">
+                            <option value="auto">Auto Detect</option>
+                            <option value="javascript">JavaScript</option>
+                            <option value="typescript">TypeScript</option>
+                            <option value="python">Python</option>
+                            <option value="php">PHP</option>
+                            <option value="java">Java</option>
+                            <option value="csharp">C#</option>
+                            <option value="go">Go</option>
+                            <option value="ruby">Ruby</option>
+                            <option value="rust">Rust</option>
+                            <option value="kotlin">Kotlin</option>
+                            <option value="shell">Shell/Bash</option>
+                            <option value="sql">SQL</option>
+                            <option value="solidity">Solidity</option>
+                        </select>
+                    </div>
+                    <textarea class="code-textarea" id="pasteInput" placeholder="// Paste your code here for instant security analysis...&#10;// Supports 14+ languages with context-aware checks"></textarea>
+                    <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+                        <button class="btn-primary" onclick="startAudit('paste')" style="flex:1">ANALYZE PASTE</button>
+                        <button class="btn-ghost" onclick="document.getElementById('pasteInput').value=''">CLEAR</button>
+                        <span style="font-family:var(--font-mono);font-size:10px;color:var(--muted)" id="pasteCharCount">0 chars</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RESULTS AREA (shared across all tabs) -->
+            <div id="resultsArea">
+                <div id="idleState">
+                    <i data-lucide="activity" class="idle-icon" style="width:36px;height:36px"></i>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);letter-spacing:2px">AWAITING SIGNAL</div>
+                </div>
+                <div id="loadingState">
+                    <div class="spinner"></div>
+                    <div class="loading-phase" id="loadingPhase">INITIALIZING...</div>
+                    <div class="loading-steps" id="loadingSteps"></div>
+                </div>
+                <div id="contentState" style="display:none"></div>
+            </div>
+
+        </div><!-- /content -->
+    </div><!-- /main -->
+</div><!-- /app -->
+
+<script>
+    /* ─── STATE ─────────────────────────────────────────────────────── */
+    let currentTab = 'url';
+    let activeFilter = 'all';
+    let lastResult = null;
+
+    /* ─── TAB SWITCHING ─────────────────────────────────────────────── */
+    function switchTab(tab) {
+        currentTab = tab;
+        document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+        document.getElementById('tab-panel-' + tab).style.display = 'block';
+        ['url','code','paste'].forEach(t => {
+            document.getElementById('tab-' + t)?.classList.toggle('active', t === tab);
+            document.getElementById('nav-' + t)?.classList.toggle('active', t === tab);
+        });
+        resetResults();
+    }
+
+    /* ─── CHECK CHIPS toggle ────────────────────────────────────────── */
+    document.querySelectorAll('.check-chip').forEach(chip => {
+        chip.addEventListener('click', () => chip.classList.toggle('active'));
+    });
+
+    /* ─── LANG CHIPS (single select) ───────────────────────────────── */
+    document.querySelectorAll('#langGrid .lang-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            document.querySelectorAll('#langGrid .lang-chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+        });
+    });
+
+    /* ─── PASTE CHAR COUNT ──────────────────────────────────────────── */
+    document.getElementById('pasteInput').addEventListener('input', function() {
+        document.getElementById('pasteCharCount').textContent = this.value.length + ' chars';
+    });
+
+    /* ─── FILE HANDLING ─────────────────────────────────────────────── */
+    function handleDragOver(e) { e.preventDefault(); document.getElementById('dropzone').classList.add('drag-over'); }
+    function handleDrop(e) {
+        e.preventDefault();
+        document.getElementById('dropzone').classList.remove('drag-over');
+        const files = Array.from(e.dataTransfer.files);
+        processFiles(files);
+    }
+    function handleFiles(e) { processFiles(Array.from(e.target.files)); }
+    function processFiles(files) {
+        const list = document.getElementById('fileList'); list.innerHTML = '';
+        window.SAFESHIP_CONTEXT.currentFiles = [];
+        files.forEach(file => {
+            const r = new FileReader(); r.onload = ev => {
+                window.SAFESHIP_CONTEXT.currentFiles.push({ name: file.name, content: ev.target.result });
+                const chip = document.createElement('div'); chip.className = 'file-chip';
+                chip.innerHTML = `<i data-lucide="file-code" style="width:11px;height:11px;color:var(--accent)"></i>${file.name}`;
+                list.appendChild(chip); lucide.createIcons();
+                document.getElementById('codeAuditBtn').disabled = false;
+            }; r.readAsText(file);
+        });
+    }
+
+    /* ─── GET ACTIVE CHECKS ────────────────────────────────────────── */
+    function getActiveChecks(containerId) {
+        return Array.from(document.querySelectorAll(`#${containerId} .check-chip.active`))
+            .map(c => c.dataset.check);
+    }
+
+    /* ─── BUILD PROMPT ──────────────────────────────────────────────── */
+    function buildPrompt(mode) {
+        const checks = mode === 'url'
+            ? getActiveChecks('urlChecks')
+            : getActiveChecks('sastChecks');
+        const checksStr = checks.join(', ');
+
+        const schema = `Respond ONLY with a valid JSON object exactly matching this schema:
+{
+  "score": <integer 0-100>,
+  "grade": <"A"|"B"|"C"|"D"|"F">,
+  "summary": <string, 2-3 sentences>,
+  "language": <detected language string>,
+  "stats": { "critical": <int>, "high": <int>, "medium": <int>, "low": <int>, "info": <int> },
+  "findings": [
+    {
+      "title": <string>,
+      "severity": <"critical"|"high"|"medium"|"low"|"info">,
+      "category": <string>,
+      "description": <string>,
+      "location": <string, file/line/function if known>,
+      "impact": <string, what an attacker can do>,
+      "fix": <string, concrete code fix or steps>,
+      "cwe": <string, e.g. "CWE-79">
+    }
+  ]
+}`;
+
+        if (mode === 'url') {
+            const url = document.getElementById('urlInput').value.trim();
+            return `You are a professional web security auditor. Perform a comprehensive security analysis of this URL: ${url}
+
+Focus on these specific checks: ${checksStr}
+
+For each issue found, provide: what it is, where it likely exists, the security impact, a concrete fix with example code, and the relevant CWE identifier.
+Be thorough and realistic — analyze headers, authentication, input handling, API design, CORS, SSL/TLS, rate limiting, and all specified checks.
+
+${schema}`;
+        }
+
+        const lang = mode === 'paste'
+            ? document.getElementById('pastelang')?.value || 'auto'
+            : (document.querySelector('#langGrid .lang-chip.active')?.dataset.lang || 'auto');
+
+        const code = mode === 'paste'
+            ? document.getElementById('pasteInput').value
+            : window.SAFESHIP_CONTEXT.currentFiles.map(f => `// FILE: ${f.name}\n${f.content}`).join('\n\n---\n\n');
+
+        return `You are an expert SAST (Static Application Security Testing) engine. Perform a deep security audit of the following ${lang !== 'auto' ? lang : 'code (auto-detect language)'}.
+
+Focus on these vulnerability categories: ${checksStr}
+
+Language context: ${lang !== 'auto' ? `This is ${lang} code` : 'Auto-detect the language and apply language-specific security checks'}
+
+Apply language-specific security knowledge:
+- For JavaScript/TypeScript: prototype pollution, eval(), DOM XSS, unsafe npm packages patterns
+- For Python: pickle deserialization, eval/exec, SQL string formatting, os.system calls
+- For PHP: file inclusion, extract(), type juggling, unsafe deserialization
+- For Java: JNDI injection, Java deserialization, XXE, reflection misuse
+- For Go: race conditions, unsafe pointer usage, integer overflow
+- For Solidity: reentrancy, integer overflow/underflow, front-running, tx.origin auth
+- For SQL: injection patterns, excessive permissions, data exposure
+- For Shell: command injection, unquoted variables, wildcard injection
+
+For each finding: exact location (file, line number, function name), precise impact, and a concrete fix with corrected code example.
+
+CODE TO AUDIT:
+\`\`\`
+${code}
+\`\`\`
+
+${schema}`;
+    }
+
+    /* ─── LOADING STEPS ─────────────────────────────────────────────── */
+    const LOADING_STEPS = {
+        url: ['Resolving target endpoint', 'Analyzing HTTP surface', 'Running security checks', 'Compiling findings'],
+        code: ['Parsing file structure', 'Detecting language patterns', 'Running SAST engine', 'Generating report'],
+        paste: ['Parsing code structure', 'Detecting language', 'Analyzing vulnerabilities', 'Compiling findings']
+    };
+
+    function showLoading(mode) {
+        document.getElementById('idleState').style.display = 'none';
+        document.getElementById('contentState').style.display = 'none';
+        const ld = document.getElementById('loadingState'); ld.style.display = 'flex';
+        const steps = document.getElementById('loadingSteps');
+        steps.innerHTML = LOADING_STEPS[mode].map((s, i) => `
+            <div class="loading-step" id="lstep-${i}"><span class="step-dot"></span>${s}</div>`).join('');
+        let i = 0;
+        const advance = () => {
+            if (i > 0) document.getElementById(`lstep-${i-1}`)?.classList.replace('active','done');
+            if (i < LOADING_STEPS[mode].length) {
+                document.getElementById(`lstep-${i}`)?.classList.add('active');
+                document.getElementById('loadingPhase').textContent = LOADING_STEPS[mode][i].toUpperCase() + '...';
+                i++;
+                return setTimeout(advance, 900 + Math.random() * 600);
+            }
+        };
+        return advance();
+    }
+
+    /* ─── START AUDIT ───────────────────────────────────────────────── */
+    async function startAudit(mode) {
+        const keys = window.SAFESHIP_CONTEXT?.sessionKeys;
+        if (!keys?.gemini && !keys?.groq) {
+            alert('No API keys found. Check deployment pipeline logs and GitHub Secrets.');
+            return;
+        }
+        if (mode === 'paste' && !document.getElementById('pasteInput').value.trim()) {
+            alert('Please paste some code first.'); return;
+        }
+        if (mode === 'url' && !document.getElementById('urlInput').value.trim()) {
+            alert('Please enter a URL.'); return;
+        }
+
+        const timer = showLoading(mode);
+        try {
+            const prompt = buildPrompt(mode);
+            const data = await callNeuralNode(prompt);
+            clearTimeout(timer);
+
+            // Label the target
+            data.target = mode === 'url'
+                ? document.getElementById('urlInput').value.trim()
+                : mode === 'paste' ? 'Pasted Code Snippet'
+                : window.SAFESHIP_CONTEXT.currentFiles.map(f => f.name).join(', ');
+
+            lastResult = data;
+            await window.saveAuditToCloud(data);
+            renderResults(data);
+        } catch (err) {
+            clearTimeout(timer);
+            window.neuralTelemetry?.('Error', err.message);
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('idleState').style.display = 'flex';
+            alert('Audit failed: ' + err.message);
+        }
+    }
+
+    /* ─── RENDER RESULTS ────────────────────────────────────────────── */
+    function getScoreColor(score) {
+        if (score >= 80) return '#00ff88';
+        if (score >= 60) return '#ffb800';
+        if (score >= 40) return '#ff7b3b';
+        return '#ff3b3b';
+    }
+
+    function severityClass(sev) {
+        const s = (sev || '').toLowerCase();
+        return { critical: 'severity-critical badge-critical', high: 'severity-high badge-high', medium: 'severity-medium badge-medium', low: 'severity-low badge-low', info: 'severity-info badge-info' }[s] || 'severity-info badge-info';
+    }
+
+    function renderResults(d, filter = 'all') {
+        document.getElementById('loadingState').style.display = 'none';
+        document.getElementById('idleState').style.display = 'none';
+        const ct = document.getElementById('contentState');
+        ct.style.display = 'block';
+        lastResult = d;
+
+        const score = d.score || 0;
+        const color = getScoreColor(score);
+        const circumference = 2 * Math.PI * 44;
+        const dash = circumference * (score / 100);
+        const stats = d.stats || { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+        const findings = (d.findings || []);
+        const filtered = filter === 'all' ? findings : findings.filter(f => (f.severity||'').toLowerCase() === filter);
+
+        ct.innerHTML = `
+        <div class="card fade-in">
+            <!-- Score header -->
+            <div class="score-header">
+                <div class="score-ring-wrap">
+                    <svg viewBox="0 0 100 100" width="100" height="100">
+                        <circle cx="50" cy="50" r="44" fill="none" stroke="var(--border)" stroke-width="6"/>
+                        <circle cx="50" cy="50" r="44" fill="none" stroke="${color}" stroke-width="6"
+                            stroke-dasharray="${dash} ${circumference}" stroke-linecap="round"
+                            style="transition:stroke-dasharray 1s ease"/>
+                    </svg>
+                    <div class="score-number">
+                        <div class="score-num" style="color:${color}">${score}</div>
+                        <div class="score-pct">/ 100</div>
+                    </div>
+                </div>
+                <div class="score-meta">
+                    <div class="score-label">Security Score</div>
+                    <div class="score-grade" style="color:${color}">${d.grade || '—'} ${getGradeLabel(d.grade)}</div>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-top:4px">${d.language || ''}</div>
+                    <div class="score-summary" style="margin-top:8px">${d.summary || ''}</div>
+                    <div style="margin-top:12px;display:flex;gap:8px">
+                        <button class="btn-ghost" onclick="resetResults()" style="font-size:10px;padding:6px 12px">↩ New Audit</button>
+                        <button class="btn-ghost" onclick="exportJSON()" style="font-size:10px;padding:6px 12px">↓ JSON</button>
+                        <button class="btn-ghost" onclick="exportMarkdown()" style="font-size:10px;padding:6px 12px">↓ MD Report</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats row -->
+            <div class="stats-row">
+                <div class="stat-box" style="border-color:rgba(255,59,59,0.3)">
+                    <div class="stat-num" style="color:var(--danger)">${stats.critical || 0}</div>
+                    <div class="stat-lbl">Critical</div>
+                </div>
+                <div class="stat-box" style="border-color:rgba(255,123,59,0.3)">
+                    <div class="stat-num" style="color:#ff7b3b">${stats.high || 0}</div>
+                    <div class="stat-lbl">High</div>
+                </div>
+                <div class="stat-box" style="border-color:rgba(255,184,0,0.3)">
+                    <div class="stat-num" style="color:var(--warn)">${stats.medium || 0}</div>
+                    <div class="stat-lbl">Medium</div>
+                </div>
+                <div class="stat-box" style="border-color:rgba(59,158,255,0.3)">
+                    <div class="stat-num" style="color:var(--info)">${stats.low || 0}</div>
+                    <div class="stat-lbl">Low</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-num" style="color:var(--muted)">${stats.info || 0}</div>
+                    <div class="stat-lbl">Info</div>
+                </div>
+                <div class="stat-box" style="border-color:var(--accent-border)">
+                    <div class="stat-num" style="color:var(--accent)">${findings.length}</div>
+                    <div class="stat-lbl">Total</div>
+                </div>
+            </div>
+
+            <!-- Filter bar -->
+            <div class="filter-bar">
+                ${['all','critical','high','medium','low','info'].map(f => `
+                    <button class="filter-btn ${activeFilter===f?'active':''}" onclick="applyFilter('${f}')">${f.toUpperCase()}</button>`).join('')}
+                <span class="filter-count" class="mono">${filtered.length} FINDINGS</span>
+            </div>
+
+            <!-- Findings -->
+            <div id="findingsList">
+                ${filtered.length === 0 ? `<div style="text-align:center;padding:32px;font-family:var(--font-mono);font-size:11px;color:var(--muted)">NO FINDINGS FOR THIS FILTER</div>` :
+                filtered.map((f, i) => {
+                    const sClasses = severityClass(f.severity);
+                    const cardClass = sClasses.split(' ')[0];
+                    const badgeClass = sClasses.split(' ')[1];
+                    return `
+                    <div class="finding-card ${cardClass}" id="finding-${i}">
+                        <div class="finding-header" onclick="toggleFinding(${i})">
+                            <div>
+                                <div class="finding-title">${f.title}</div>
+                                ${f.cwe ? `<div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);margin-top:3px">${f.cwe} · ${f.category||''}</div>` : ''}
+                            </div>
+                            <div style="display:flex;align-items:center;gap:8px">
+                                <span class="severity-badge ${badgeClass}">${(f.severity||'info').toUpperCase()}</span>
+                                <i data-lucide="chevron-down" class="finding-toggle" style="width:14px;height:14px"></i>
+                            </div>
                         </div>
-                    </div>`).join('')}</div>`;
-            lucide.createIcons();
-        }
+                        <div class="finding-body">
+                            <div class="finding-location"><i data-lucide="map-pin" style="width:10px;height:10px;display:inline;vertical-align:middle;margin-right:4px"></i>${f.location || 'Location unknown'}</div>
+                            <div class="finding-desc">${f.description}</div>
+                            ${f.impact ? `<div style="background:rgba(255,59,59,0.06);border:1px solid rgba(255,59,59,0.15);border-radius:8px;padding:10px;margin-bottom:12px">
+                                <div style="font-family:var(--font-mono);font-size:9px;color:var(--danger);letter-spacing:1px;margin-bottom:4px">⚡ IMPACT</div>
+                                <div style="font-size:12px;color:var(--muted)">${f.impact}</div>
+                            </div>` : ''}
+                            <div class="finding-fix">
+                                <div class="fix-label">✦ Recommended Fix</div>
+                                <pre class="fix-code">${f.fix}</pre>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>
+        </div>`;
+        lucide.createIcons();
+    }
 
-        function renderHistory() {
-            const h = window.SAFESHIP_CONTEXT.history, c = document.getElementById('historyContainer');
-            if (!h.length) { c.innerHTML = '<p class="text-[10px] text-center text-zinc-700 mt-4 uppercase font-bold">No Trace History</p>'; return; }
-            c.innerHTML = h.map(i => `
-                <div class="group p-3 bg-zinc-900/30 border border-zinc-800/50 rounded-xl hover:border-emerald-500/30 cursor-pointer transition-all relative">
-                    <div onclick='renderResults(${JSON.stringify(i).replace(/'/g, "&apos;")})' class="pr-6">
-                        <div class="flex justify-between items-center mb-1"><span class="text-[10px] font-bold text-emerald-500">${i.score}%</span><span class="text-[8px] text-zinc-600 font-mono">${i.timestamp ? new Date(i.timestamp.seconds * 1000).toLocaleDateString() : 'Syncing'}</span></div>
-                        <p class="text-[10px] font-medium text-zinc-400 truncate">${i.target}</p>
+    function getGradeLabel(g) {
+        return { A:'Excellent', B:'Good', C:'Fair', D:'Poor', F:'Critical' }[g] || '';
+    }
+
+    function applyFilter(f) {
+        activeFilter = f;
+        if (lastResult) renderResults(lastResult, f);
+    }
+
+    function toggleFinding(i) {
+        document.getElementById('finding-' + i)?.classList.toggle('expanded');
+        lucide.createIcons();
+    }
+
+    /* ─── EXPORT ────────────────────────────────────────────────────── */
+    function exportJSON() {
+        if (!lastResult) return;
+        const blob = new Blob([JSON.stringify(lastResult, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `safeship-audit-${Date.now()}.json`; a.click();
+    }
+
+    function exportMarkdown() {
+        if (!lastResult) return;
+        const d = lastResult;
+        let md = `# SafeShip Security Report\n\n**Score:** ${d.score}/100 (${d.grade})\n**Target:** ${d.target}\n**Language:** ${d.language || 'N/A'}\n\n## Summary\n${d.summary}\n\n## Findings (${(d.findings||[]).length})\n\n`;
+        (d.findings || []).forEach((f, i) => {
+            md += `### ${i+1}. ${f.title} [${(f.severity||'').toUpperCase()}]\n`;
+            if (f.cwe) md += `**CWE:** ${f.cwe}  \n`;
+            md += `**Location:** ${f.location}  \n**Category:** ${f.category}  \n\n${f.description}\n\n`;
+            if (f.impact) md += `**Impact:** ${f.impact}\n\n`;
+            md += `**Fix:**\n\`\`\`\n${f.fix}\n\`\`\`\n\n---\n\n`;
+        });
+        const blob = new Blob([md], { type: 'text/markdown' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `safeship-report-${Date.now()}.md`; a.click();
+    }
+
+    /* ─── RESET ─────────────────────────────────────────────────────── */
+    function resetResults() {
+        document.getElementById('idleState').style.display = 'flex';
+        document.getElementById('loadingState').style.display = 'none';
+        document.getElementById('contentState').style.display = 'none';
+        activeFilter = 'all';
+        lastResult = null;
+    }
+
+    /* ─── HISTORY ───────────────────────────────────────────────────── */
+    function renderHistory() {
+        const h = window.SAFESHIP_CONTEXT?.history || [];
+        const c = document.getElementById('historyContainer');
+        if (!h.length) { c.innerHTML = '<div style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:10px;color:var(--muted)">NO TRACES YET</div>'; return; }
+        c.innerHTML = h.map(i => {
+            const color = getScoreColor(i.score || 0);
+            return `<div class="history-item">
+                <div onclick='renderResults(${JSON.stringify(i).replace(/'/g,"&apos;")})'>
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <span class="history-score" style="color:${color}">${i.score || 0}/100</span>
+                        <span class="history-date">${i.timestamp ? new Date(i.timestamp.seconds*1000).toLocaleDateString() : '—'}</span>
                     </div>
-                    <button onclick="deleteAudit('${i.id}')" class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
-                </div>`).join('');
-            lucide.createIcons();
-        }
+                    <div class="history-target">${i.target || 'Unknown'}</div>
+                </div>
+                <button class="history-delete" onclick="deleteAudit('${i.id}')" data-tip="Delete">
+                    <i data-lucide="trash-2" style="width:12px;height:12px"></i>
+                </button>
+            </div>`;
+        }).join('');
+        lucide.createIcons();
+    }
+</script>
 
-        window.resetUI = () => { location.reload(); };
-    </script>
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    window.neuralTelemetry = (c, m, d=null) => console.log(`%c[NEURAL][${c}]%c ${m}`, 'color:#00ff88;font-weight:bold', 'color:#5a6060', d||'');
+
+    const isInjected = val => typeof val === 'string' && val && !val.startsWith('__') && !val.endsWith('__');
+    const getGeminiKey = () => isInjected(window.INJECTED_GEMINI_KEY) ? window.INJECTED_GEMINI_KEY : null;
+    const getGroqKey   = () => isInjected(window.INJECTED_GROQ_KEY)   ? window.INJECTED_GROQ_KEY   : null;
+    const getFirebaseConfig = () => {
+        const r = window.INJECTED_FIREBASE;
+        return (r && typeof r === 'object' && r.apiKey) ? r : null;
+    };
+
+    const appId = 'safeship-trace-v7';
+    window.SAFESHIP_CONTEXT = {
+        db: null, auth: null, appId, user: null, history: [], currentFiles: [],
+        sessionKeys: { gemini: getGeminiKey(), groq: getGroqKey() }
+    };
+
+    /* ── Status UI ── */
+    function setStatus(label, state) {
+        document.getElementById('statusLabel').textContent = label;
+        const dot = document.getElementById('statusDot');
+        dot.className = 'status-dot' + (state === 'active' ? ' active' : state === 'warn' ? ' warn' : state === 'error' ? ' error' : '');
+    }
+
+    /* ── Firebase init ── */
+    const config = getFirebaseConfig();
+    if (config) {
+        try {
+            const app = initializeApp(config);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+            window.SAFESHIP_CONTEXT.auth = auth;
+            window.SAFESHIP_CONTEXT.db = db;
+            onAuthStateChanged(auth, user => {
+                window.SAFESHIP_CONTEXT.user = user;
+                const el = document.getElementById('userIdText');
+                if (el) el.textContent = user ? user.uid.slice(0,20)+'...' : 'Connecting...';
+                if (user) { setStatus('Cloud Linked', 'active'); loadHistory(user.uid); }
+            });
+            setStatus('Connecting', '');
+            await signInAnonymously(auth);
+            neuralTelemetry('Firebase', 'Uplink established');
+        } catch (e) {
+            neuralTelemetry('Firebase', 'Init error', e);
+            setStatus('DB Offline', 'error');
+        }
+    } else {
+        neuralTelemetry('Firebase', 'Standalone mode');
+        setStatus('Standalone', '');
+    }
+
+    /* ── Key status ── */
+    const { gemini, groq } = window.SAFESHIP_CONTEXT.sessionKeys;
+    if (gemini) { neuralTelemetry('Engine', 'Gemini node online'); if (!config) setStatus('Neural Active', 'active'); }
+    else if (groq) { neuralTelemetry('Engine', 'Groq fallback online'); if (!config) setStatus('Groq Fallback', 'warn'); }
+    else { neuralTelemetry('Engine', 'CRITICAL: No AI keys'); setStatus('No Keys', 'error'); }
+
+    /* ── Firestore ── */
+    function loadHistory(userId) {
+        const { db, appId } = window.SAFESHIP_CONTEXT;
+        if (!db) return;
+        onSnapshot(collection(db, 'artifacts', appId, 'users', userId, 'audits'), snap => {
+            window.SAFESHIP_CONTEXT.history = snap.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .sort((a, b) => (b.timestamp?.seconds||0) - (a.timestamp?.seconds||0));
+            renderHistory();
+        }, err => neuralTelemetry('History', 'Access error', err));
+    }
+
+    window.saveAuditToCloud = async data => {
+        const { db, user, appId } = window.SAFESHIP_CONTEXT;
+        if (!db || !user) return;
+        try { await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'audits'), { ...data, timestamp: serverTimestamp() }); }
+        catch(e) { neuralTelemetry('Storage', 'Write error', e); }
+    };
+
+    window.deleteAudit = async id => {
+        const { db, user, appId } = window.SAFESHIP_CONTEXT;
+        if (!db || !user) return;
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'audits', id)); }
+        catch(e) { neuralTelemetry('Storage', 'Delete error', e); }
+    };
+
+    /* ── AI API calls ── */
+    window.callNeuralNode = async prompt => {
+        const { gemini, groq } = window.SAFESHIP_CONTEXT.sessionKeys;
+        if (gemini) {
+            try { return await callGemini(gemini, prompt); }
+            catch(e) { if (groq) return await callGroq(groq, prompt); throw e; }
+        }
+        if (groq) return await callGroq(groq, prompt);
+        throw new Error('No API keys configured.');
+    };
+
+    async function callGemini(key, prompt) {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } })
+        });
+        if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
+        const d = await res.json();
+        return JSON.parse(d.candidates[0].content.parts[0].text);
+    }
+
+    async function callGroq(key, prompt) {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } })
+        });
+        if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`);
+        const d = await res.json();
+        return JSON.parse(d.choices[0].message.content);
+    }
+
+    lucide.createIcons();
+</script>
 </body>
 </html>
