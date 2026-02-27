@@ -19,15 +19,7 @@
         // They are plain JS variables so the module script below can read them.
         var INJECTED_GEMINI_KEY = "AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA";
         var INJECTED_GROQ_KEY   = "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";
-        var INJECTED_FIREBASE   = '{
-  apiKey: "AIzaSyB_d7N2FTeD0mrO-odMx2ajwtVIHOOKig0",
-  authDomain: "safeship-trace.firebaseapp.com",
-  projectId: "safeship-trace",
-  storageBucket: "safeship-trace.firebasestorage.app",
-  messagingSenderId: "538497558292",
-  appId: "1:538497558292:web:0e512311b343b5ec1f0401",
-  measurementId: "G-Z097L20KCF"
-}';
+        var INJECTED_FIREBASE   = { apiKey: "AIzaSyB_d7N2FTeD0mrO-odMx2ajwtVIHOOKig0", authDomain: "safeship-trace.firebaseapp.com", projectId: "safeship-trace", storageBucket: "safeship-trace.firebasestorage.app", messagingSenderId: "538497558292", appId: "1:538497558292:web:0e512311b343b5ec1f0401", measurementId: "G-Z097L20KCF"};
     </script>
 
     <script type="module">
@@ -45,20 +37,19 @@
         // The deploy.yml pipeline replaces the __PLACEHOLDER__ strings inside the
         // INJECTED_* variables above with real secret values.
         // We check: if the value still looks like a placeholder → key not injected.
-        const isInjected = (val) => val && val !== "" && !val.startsWith("__") && !val.endsWith("__");
+        // String keys: valid if not empty and not still a placeholder
+        const isInjected = (val) => typeof val === 'string' && val !== "" && !val.startsWith("__") && !val.endsWith("__");
 
         const getGeminiKey = () => isInjected(window.INJECTED_GEMINI_KEY) ? window.INJECTED_GEMINI_KEY : null;
         const getGroqKey   = () => isInjected(window.INJECTED_GROQ_KEY)   ? window.INJECTED_GROQ_KEY   : null;
 
         const getFirebaseConfig = () => {
             const raw = window.INJECTED_FIREBASE;
-            if (!isInjected(raw)) return null;
-            try {
-                return typeof raw === 'object' ? raw : JSON.parse(raw);
-            } catch (e) {
-                neuralTelemetry("Firebase", "Config parse error", e);
-                return null;
-            }
+            // After deploy injection, INJECTED_FIREBASE is a JS object literal (no quotes).
+            // Before injection (local/raw), it is the placeholder string "{ apiKey: "AIzaSyB_d7N2FTeD0mrO-odMx2ajwtVIHOOKig0", authDomain: "safeship-trace.firebaseapp.com", projectId: "safeship-trace", storageBucket: "safeship-trace.firebasestorage.app", messagingSenderId: "538497558292", appId: "1:538497558292:web:0e512311b343b5ec1f0401", measurementId: "G-Z097L20KCF"}".
+            if (!raw || typeof raw === 'string') return null;  // still a placeholder string → not injected
+            if (typeof raw === 'object' && raw.apiKey) return raw;
+            return null;
         };
         // ───────────────────────────────────────────────────────────────────────
 
