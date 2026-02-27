@@ -20,9 +20,10 @@ jobs:
       - name: Inject Neural Secrets (Safe Python Mode)
         shell: python
         env:
-          GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GROQ_KEY: ${{ secrets.GROQ_API_KEY }}
-          FB_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
+          # These names must match the os.environ.get() calls below exactly
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
         run: |
             import os
             import sys
@@ -37,6 +38,7 @@ jobs:
                 content = f.read()
 
             # Mapping GitHub Secrets to internal placeholders
+            # We now use exact matches for the env variable names defined above
             replacements = {
                 '__GEMINI_API_KEY__': os.environ.get('GEMINI_API_KEY', ''),
                 '__GROQ_API_KEY__': os.environ.get('GROQ_API_KEY', ''),
@@ -45,38 +47,31 @@ jobs:
 
             failed_injection = False
             for placeholder, value in replacements.items():
-                # Check if secret exists
+                # Check if secret exists and has content
                 if not value or value.strip() == "" or value == "{}":
-                    print(f"[!] TELEMETRY ALERT: Secret for {placeholder} is missing in GitHub Repository Settings.")
+                    print(f"[!] TELEMETRY ALERT: Secret for {placeholder} is missing or empty in GitHub Settings.")
                     failed_injection = True
                     continue
                 
-                # Critical validation for Firebase JSON format
+                # Special validation for Firebase Config JSON
                 if placeholder == '__FIREBASE_CONFIG_JSON__':
-                    # Strip potential whitespace or hidden characters
                     clean_value = value.strip()
                     try:
                         json.loads(clean_value)
-                        print("[*] TELEMETRY: FIREBASE_CONFIG validated as valid JSON.")
+                        print(f"[*] TELEMETRY: FIREBASE_CONFIG validated (Length: {len(clean_value)} chars).")
                     except ValueError as e:
                         print(f"[!] CRITICAL ERROR: FIREBASE_CONFIG is NOT valid JSON.")
                         print(f"[DEBUG]: {str(e)}")
-                        
-                        # Automated format diagnostic
                         if "'" in clean_value:
                             print("[ADVISORY]: Found single quotes ('). JSON requires double quotes (\").")
-                        if "firebaseConfig" in clean_value or "=" in clean_value:
-                            print("[ADVISORY]: Found variable assignment. Ensure your secret contains ONLY the { ... } object.")
-                        if clean_value.endswith(","):
-                            print("[ADVISORY]: Found trailing comma at end of object.")
-                            
                         failed_injection = True
+                else:
+                    print(f"[*] TELEMETRY: Prepared injection for {placeholder} (Length: {len(value)} chars).")
                 
-                print(f"[*] TELEMETRY: Prepared injection for {placeholder}.")
                 content = content.replace(placeholder, value)
 
             if failed_injection:
-                print("[!] DEPLOYMENT ABORTED: One or more critical Neural Nodes are missing or malformed.")
+                print("[!] DEPLOYMENT ABORTED: Neural Nodes could not be linked due to missing secrets.")
                 sys.exit(1)
 
             with open(filename, 'w', encoding='utf-8') as f:
@@ -91,4 +86,4 @@ jobs:
           publish_dir: ./
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: "Neural v6.2.2: Production Deployment [skip ci]"
+          commit_message: "Neural v6.2.2: Handshake Fix [skip ci]"
