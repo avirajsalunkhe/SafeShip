@@ -1,1 +1,449 @@
  
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeShip | Neural Trace Engine v6.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        /**
+         * SECURE CONFIGURATION BLOCK
+         * Replaced during the Python deployment step.
+         */
+        let firebaseConfig = {};
+        try {
+            const rawConfig = '__FIREBASE_CONFIG_JSON__';
+            // Only attempt to parse if the placeholder was actually replaced
+            if (rawConfig && !rawConfig.startsWith('__')) {
+                firebaseConfig = JSON.parse(rawConfig);
+            }
+        } catch (e) {
+            console.error("Neural Config Parse Error: Ensure FIREBASE_CONFIG is a valid JSON string in GitHub Secrets.", e);
+        }
+
+        // Initialize Firebase services
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = 'safeship-trace-v6';
+
+        // Global context for application state
+        window.SAFESHIP_CONTEXT = {
+            db, auth, appId,
+            user: null,
+            history: [],
+            currentFiles: [],
+            sessionKeys: {
+                gemini: "__GEMINI_API_KEY__",
+                groq: "__GROQ_API_KEY__"
+            }
+        };
+
+        // Identity Handshake
+        const initAuth = async () => {
+            try {
+                // If a token is provided by environment (advanced), use it, otherwise anonymous
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (e) {
+                console.error("Neural Identity Failure:", e);
+            }
+        };
+
+        onAuthStateChanged(auth, (user) => {
+            window.SAFESHIP_CONTEXT.user = user;
+            if (user) {
+                document.getElementById('userIdText').innerText = user.uid;
+                loadHistory(user.uid);
+            }
+        });
+
+        initAuth();
+
+        function loadHistory(userId) {
+            const historyPath = collection(db, 'artifacts', appId, 'users', userId, 'audits');
+            onSnapshot(historyPath, (snapshot) => {
+                const audits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                    .sort((a, b) => b.timestamp?.seconds - a.timestamp?.seconds);
+                window.SAFESHIP_CONTEXT.history = audits;
+                renderHistory();
+            }, (err) => console.error("Trace Stream Error:", err));
+        }
+
+        window.saveAuditToCloud = async (auditData) => {
+            if (!window.SAFESHIP_CONTEXT.user) return;
+            const userId = window.SAFESHIP_CONTEXT.user.uid;
+            await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'audits'), {
+                ...auditData,
+                timestamp: serverTimestamp()
+            });
+        };
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        :root {
+            --emerald-glow: rgba(16, 185, 129, 0.15);
+            --bg-deep: #020203;
+        }
+
+        body { 
+            font-family: 'Space Grotesk', sans-serif; 
+            background-color: var(--bg-deep);
+            color: #f4f4f5;
+            overflow-x: hidden;
+        }
+
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
+
+        .neon-border {
+            box-shadow: 0 0 20px var(--emerald-glow);
+        }
+
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
+        }
+
+        .scanline::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to bottom, transparent, rgba(16, 185, 129, 0.05), transparent);
+            animation: scanline 4s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes pulse-link {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.95); }
+        }
+        .animate-link { animation: pulse-link 2s infinite ease-in-out; }
+    </style>
+</head>
+<body class="selection:bg-emerald-500/30">
+
+    <div class="fixed -top-24 -left-24 w-96 h-96 bg-emerald-600/10 rounded-full blur-[120px] pointer-events-none"></div>
+    <div class="fixed top-1/2 -right-24 w-64 h-64 bg-blue-600/10 rounded-full blur-[100px] pointer-events-none"></div>
+
+    <div class="flex h-screen overflow-hidden">
+        
+        <!-- Sidebar -->
+        <aside class="w-72 border-r border-zinc-800/50 bg-black/40 flex flex-col z-50">
+            <div class="p-6 border-b border-zinc-800/50 flex items-center gap-3">
+                <div class="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center neon-border">
+                    <i data-lucide="shield-check" class="w-5 h-5 text-black"></i>
+                </div>
+                <h1 class="text-lg font-bold tracking-tight">SafeShip <span class="text-emerald-500">v6</span></h1>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4 space-y-4">
+                <div class="flex items-center justify-between px-2">
+                    <span class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">History Traces</span>
+                    <i data-lucide="database" class="w-3 h-3 text-zinc-600"></i>
+                </div>
+                <div id="historyContainer" class="space-y-2">
+                    <div class="p-4 text-center text-zinc-600 text-xs italic">Loading traces...</div>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-zinc-800/50">
+                <div id="userBadge" class="flex items-center gap-3 p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
+                    <div class="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center">
+                        <i data-lucide="user" class="w-4 h-4 text-zinc-400"></i>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="text-[10px] text-zinc-500 uppercase font-black">Secure ID</span>
+                        <span id="userIdText" class="text-[10px] font-mono text-emerald-500 truncate w-32 tracking-tighter">Connecting...</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="flex-1 overflow-y-auto relative flex flex-col">
+            
+            <nav class="h-16 border-b border-zinc-800/50 flex items-center justify-between px-8 bg-black/20 backdrop-blur-md sticky top-0 z-40">
+                <div class="flex gap-8">
+                    <button onclick="setMode('url')" id="modeTab-url" class="text-xs font-black uppercase tracking-widest text-emerald-500 border-b-2 border-emerald-500 h-16 transition-all">URL Scan</button>
+                    <button onclick="setMode('code')" id="modeTab-code" class="text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-200 h-16 transition-all">SAST Multi-File</button>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div id="neuralStatus" class="flex items-center gap-2 px-4 py-2 bg-zinc-900 rounded-xl border border-zinc-800 transition-all">
+                        <div id="statusPulse" class="w-2 h-2 rounded-full bg-zinc-700"></div>
+                        <span id="statusLabel" class="text-[10px] font-black uppercase tracking-widest text-zinc-500">Awaiting Secrets</span>
+                    </div>
+                </div>
+            </nav>
+
+            <div class="p-8 max-w-5xl mx-auto w-full space-y-8">
+                
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- URL SECTION -->
+                    <div id="urlSection" class="space-y-4">
+                        <div class="flex flex-col gap-2">
+                            <h2 class="text-4xl font-bold tracking-tighter">Deep <span class="text-emerald-500">Live</span> Probe.</h2>
+                            <p class="text-zinc-400 text-sm">Automated infrastructure audit and DNS-level security tracing.</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <div class="flex-1 relative group">
+                                <div class="absolute inset-y-0 left-4 flex items-center text-zinc-500">
+                                    <i data-lucide="globe" class="w-5 h-5"></i>
+                                </div>
+                                <input type="text" id="urlInput" placeholder="https://target-endpoint.com" class="w-full bg-zinc-900/50 border border-zinc-800 rounded-2xl py-4 pl-12 pr-4 text-sm focus:border-emerald-500 outline-none transition-all">
+                            </div>
+                            <button onclick="startAudit()" class="bg-emerald-500 hover:bg-emerald-400 text-black font-black px-8 rounded-2xl transition-all active:scale-95 shadow-lg shadow-emerald-500/20">INITIATE PROBE</button>
+                        </div>
+                    </div>
+
+                    <!-- CODE SECTION -->
+                    <div id="codeSection" class="hidden space-y-4">
+                        <div class="flex flex-col gap-2">
+                            <h2 class="text-4xl font-bold tracking-tighter">Multi-File <span class="text-emerald-500">SAST</span>.</h2>
+                            <p class="text-zinc-400 text-sm">Neural analysis of cross-file logic dependencies and secrets leakage.</p>
+                        </div>
+                        <div id="dropzone" class="border-2 border-dashed border-zinc-800 rounded-3xl p-12 text-center bg-zinc-900/10 hover:bg-zinc-900/30 transition-all cursor-pointer group" onclick="document.getElementById('fileInput').click()">
+                            <input type="file" id="fileInput" multiple class="hidden" onchange="handleFiles(event)">
+                            <div class="flex flex-col items-center gap-4">
+                                <div class="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                                    <i data-lucide="upload-cloud" class="w-8 h-8 text-zinc-500 group-hover:text-emerald-500"></i>
+                                </div>
+                                <div>
+                                    <p class="text-sm font-bold">Click to upload or drag files/folders</p>
+                                    <p class="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Accepts .js, .py, .java, .ts, .go, .php</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="fileList" class="flex flex-wrap gap-2"></div>
+                        <button id="codeAuditBtn" onclick="startAudit()" class="w-full bg-white text-black font-black py-4 rounded-2xl hover:bg-zinc-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed" disabled>ANALYZE REPOSITORY</button>
+                    </div>
+                </div>
+
+                <div id="resultsArea" class="min-h-[400px]">
+                    <div id="idleState" class="h-[400px] border border-zinc-800/50 rounded-[2.5rem] flex flex-col items-center justify-center bg-black/20 scanline relative overflow-hidden">
+                        <i data-lucide="activity" class="w-12 h-12 text-zinc-800 mb-4 animate-pulse"></i>
+                        <p class="text-[10px] font-black text-zinc-600 uppercase tracking-[0.5em]">Awaiting Signal Input</p>
+                    </div>
+
+                    <div id="loadingState" class="hidden h-[400px] flex flex-col items-center justify-center">
+                        <div class="w-32 h-1 bg-zinc-800 rounded-full overflow-hidden mb-8">
+                            <div class="h-full bg-emerald-500 animate-[loading_1.5s_infinite_linear]"></div>
+                        </div>
+                        <p id="loadingPhase" class="text-xs font-mono text-emerald-500 uppercase tracking-widest animate-pulse">Initializing Neural Link...</p>
+                    </div>
+
+                    <div id="contentState" class="hidden space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let auditMode = 'url';
+
+        function autoConfigureNeuralNodes() {
+            const keys = window.SAFESHIP_CONTEXT.sessionKeys;
+            const statusPulse = document.getElementById('statusPulse');
+            const statusLabel = document.getElementById('statusLabel');
+            
+            const isGeminiLinked = keys.gemini && !keys.gemini.startsWith("__");
+
+            if (isGeminiLinked) {
+                statusPulse.className = "w-2 h-2 rounded-full bg-emerald-500 animate-link shadow-[0_0_8px_rgba(16,185,129,0.5)]";
+                statusLabel.innerText = "Neural Linked";
+                statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-emerald-500";
+            } else {
+                statusPulse.className = "w-2 h-2 rounded-full bg-rose-500";
+                statusLabel.innerText = "Secret Injection Error";
+                statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-rose-500";
+            }
+        }
+
+        function setMode(mode) {
+            auditMode = mode;
+            document.getElementById('urlSection').classList.toggle('hidden', mode !== 'url');
+            document.getElementById('codeSection').classList.toggle('hidden', mode !== 'code');
+            ['url', 'code'].forEach(m => {
+                const btn = document.getElementById(`modeTab-${m}`);
+                btn.className = mode === m 
+                    ? "text-xs font-black uppercase tracking-widest text-emerald-500 border-b-2 border-emerald-500 h-16 transition-all"
+                    : "text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-200 h-16 transition-all";
+            });
+        }
+
+        function handleFiles(e) {
+            const files = Array.from(e.target.files);
+            const container = document.getElementById('fileList');
+            container.innerHTML = '';
+            window.SAFESHIP_CONTEXT.currentFiles = [];
+
+            files.forEach((file) => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    window.SAFESHIP_CONTEXT.currentFiles.push({ name: file.name, content: event.target.result });
+                    const div = document.createElement('div');
+                    div.className = "bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg text-[10px] flex items-center gap-2";
+                    div.innerHTML = `<i data-lucide="file-code" class="w-3 h-3 text-emerald-500"></i> ${file.name}`;
+                    container.appendChild(div);
+                    lucide.createIcons();
+                    document.getElementById('codeAuditBtn').disabled = false;
+                };
+                reader.readAsText(file);
+            });
+        }
+
+        async function startAudit() {
+            const loading = document.getElementById('loadingState');
+            const idle = document.getElementById('idleState');
+            const content = document.getElementById('contentState');
+            const phase = document.getElementById('loadingPhase');
+
+            idle.classList.add('hidden');
+            content.classList.add('hidden');
+            loading.classList.remove('hidden');
+
+            try {
+                if (window.SAFESHIP_CONTEXT.sessionKeys.gemini.startsWith("__")) 
+                    throw new Error("Neural Nodes inactive. Verify GitHub Secrets.");
+
+                let reportData;
+                if (auditMode === 'url') {
+                    const url = document.getElementById('urlInput').value.trim();
+                    if(!url) throw new Error("Target URL required");
+                    phase.innerText = "Tracing Infrastructure...";
+                    const scrapedData = await simulateScrape(url);
+                    phase.innerText = "Neural Mapping...";
+                    reportData = await callGemini(`Audit website: ${url}. Scrape: ${scrapedData}`);
+                    reportData.target = url;
+                } else {
+                    phase.innerText = "Tracing Logical Debt...";
+                    const aggregatedCode = window.SAFESHIP_CONTEXT.currentFiles.map(f => `File: ${f.name}\n${f.content}`).join('\n\n');
+                    reportData = await callGemini(`SAST Audit: ${aggregatedCode}`);
+                    reportData.target = "Repo Trace";
+                }
+
+                await window.saveAuditToCloud(reportData);
+                renderResults(reportData);
+            } catch (err) {
+                alert(err.message);
+                loading.classList.add('hidden');
+                idle.classList.remove('hidden');
+            }
+        }
+
+        async function simulateScrape(url) {
+            try {
+                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+                const response = await fetch(proxyUrl);
+                const data = await response.json();
+                return data.contents.substring(0, 4000); 
+            } catch (e) { return "Scrape Restricted."; }
+        }
+
+        async function callGemini(prompt) {
+            const key = window.SAFESHIP_CONTEXT.sessionKeys.gemini;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            score: { type: "NUMBER" },
+                            summary: { type: "STRING" },
+                            findings: {
+                                type: "ARRAY",
+                                items: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        title: { type: "STRING" },
+                                        severity: { type: "STRING" },
+                                        description: { type: "STRING" },
+                                        location: { type: "STRING" },
+                                        fix: { type: "STRING" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+            const response = await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
+            const data = await response.json();
+            return JSON.parse(data.candidates[0].content.parts[0].text);
+        }
+
+        function renderResults(data) {
+            const container = document.getElementById('contentState');
+            document.getElementById('loadingState').classList.add('hidden');
+            container.classList.remove('hidden');
+            container.innerHTML = `
+                <div class="flex justify-between items-end">
+                    <div>
+                        <span class="text-[10px] font-black uppercase text-zinc-500 tracking-[0.3em]">Trace Verdict</span>
+                        <h3 class="text-6xl font-bold tracking-tighter">${data.score}%</h3>
+                    </div>
+                    <button onclick="exportJSON(${JSON.stringify(data).replace(/"/g, '&quot;')})" class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-400 hover:text-emerald-500"><i data-lucide="download"></i></button>
+                </div>
+                <div class="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-[2rem] text-sm text-zinc-400">${data.summary}</div>
+                <div class="space-y-4">
+                    ${data.findings.map(f => `
+                        <div class="bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6">
+                            <h4 class="font-bold text-white mb-2">${f.title}</h4>
+                            <p class="text-xs text-zinc-500 font-mono mb-2">${f.location}</p>
+                            <p class="text-sm text-zinc-400 mb-4">${f.description}</p>
+                            <div class="p-4 bg-black/40 rounded-xl border border-emerald-500/10">
+                                <p class="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-2">Neural Fix</p>
+                                <code class="text-xs font-mono text-emerald-400 whitespace-pre-wrap">${f.fix}</code>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        function renderHistory() {
+            const container = document.getElementById('historyContainer');
+            const history = window.SAFESHIP_CONTEXT.history;
+            if (history.length === 0) {
+                container.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold">No Records</div>`;
+                return;
+            }
+            container.innerHTML = history.map(h => `
+                <div onclick='renderResults(${JSON.stringify(h)})' class="p-3 bg-zinc-900/30 border border-zinc-800/50 rounded-xl hover:border-emerald-500/50 cursor-pointer transition-all">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-[10px] font-bold text-emerald-500">${h.score}%</span>
+                        <span class="text-[9px] text-zinc-600 font-mono">${new Date(h.timestamp?.seconds * 1000).toLocaleDateString()}</span>
+                    </div>
+                    <p class="text-[11px] font-medium text-zinc-400 truncate">${h.target || 'Analysis Trace'}</p>
+                </div>
+            `).join('');
+        }
+
+        function exportJSON(data) {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `report-${Date.now()}.json`; a.click();
+        }
+
+        window.onload = () => { lucide.createIcons(); setMode('url'); autoConfigureNeuralNodes(); };
+    </script>
+</body>
+</html>
