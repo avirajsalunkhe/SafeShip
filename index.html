@@ -15,16 +15,15 @@
         import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         /**
-         * 1. Initialize Global Context IMMEDIATELY
-         * Standard Artifact Pattern: apiKey is provided at runtime by the environment.
+         * 1. Initialize Global Context
+         * We detect keys from the system environment (Canvas) or GitHub placeholders.
          */
-        const apiKey = ""; 
-
         const detectGeminiKey = () => {
-            // Priority 1: Check the system-provided apiKey variable
-            if (typeof apiKey !== 'undefined' && apiKey && apiKey !== "") return apiKey;
+            // Check global scope for apiKey provided by the environment
+            const envKey = typeof apiKey !== 'undefined' ? apiKey : '';
+            if (envKey && envKey !== "") return envKey;
             
-            // Priority 2: Check for GitHub Secret injection placeholder
+            // Check for GitHub Secret injection placeholder
             const githubInjected = "AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA";
             if (githubInjected && !githubInjected.startsWith("__") && githubInjected !== "") {
                 return githubInjected;
@@ -48,16 +47,14 @@
 
         /**
          * SECURE CONFIGURATION BLOCK
-         * Improved resilience for Firebase Config detection in both Canvas and GitHub.
+         * Detects Firebase Config from global variables or GitHub placeholders.
          */
         let firebaseConfig = null;
         try {
-            // Check platform provided config (Canvas/Artifacts environment)
             if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                 firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
             } 
             
-            // Fall back to manual injection placeholder (GitHub Actions)
             if (!firebaseConfig || !firebaseConfig.apiKey) {
                 const rawInjected = '{
   apiKey: "AIzaSyB_d7N2FTeD0mrO-odMx2ajwtVIHOOKig0",
@@ -73,10 +70,10 @@
                 }
             }
         } catch (e) {
-            console.error("SafeShip Config: Neural Node failed to handshake with Firebase.", e);
+            console.error("SafeShip Config: Failed to parse Firebase configuration.", e);
         }
 
-        // 2. Conditional Initialization: Guarding against empty config
+        // 2. Conditional Initialization
         if (firebaseConfig && firebaseConfig.apiKey) {
             try {
                 const app = initializeApp(firebaseConfig);
@@ -86,7 +83,6 @@
                 window.SAFESHIP_CONTEXT.auth = auth;
                 window.SAFESHIP_CONTEXT.db = db;
 
-                // Identity Handshake
                 const initAuth = async () => {
                     try {
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -110,29 +106,27 @@
 
                 initAuth();
             } catch (e) {
-                console.error("SafeShip Firebase: Service Initialization Error.", e);
+                console.error("SafeShip Firebase: Initialization Error.", e);
             }
         } else {
             console.warn("SafeShip: Neural Persistence node is offline (Missing Config).");
-            // Soft failure UI update
             setTimeout(() => {
                 const statusLabel = document.getElementById('statusLabel');
                 const historyCont = document.getElementById('historyContainer');
-                if (statusLabel && statusLabel.innerText.includes("Awaiting")) {
+                if (statusLabel) {
                     statusLabel.innerText = "Persistence Offline";
                     statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-zinc-600";
                 }
-                if (historyCont && historyCont.innerText.includes("Awaiting")) {
+                if (historyCont) {
                     historyCont.innerHTML = `<div class="p-4 text-center text-zinc-700 text-[10px] uppercase font-bold border border-zinc-900 rounded-xl">Local Session Mode</div>`;
                 }
-            }, 800);
+            }, 500);
         }
 
         function loadHistory(userId) {
             const { db, appId } = window.SAFESHIP_CONTEXT;
             if (!db) return;
 
-            // Follow Rule 1: Strict Paths for Firestore
             const historyPath = collection(db, 'artifacts', appId, 'users', userId, 'audits');
             onSnapshot(historyPath, (snapshot) => {
                 const audits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
@@ -140,7 +134,7 @@
                 window.SAFESHIP_CONTEXT.history = audits;
                 renderHistory();
             }, (err) => {
-                console.error("SafeShip History: Real-time stream failed.", err);
+                console.error("SafeShip History: Stream error.", err);
             });
         }
 
@@ -154,7 +148,7 @@
                     timestamp: serverTimestamp()
                 });
             } catch (e) {
-                console.error("SafeShip Cloud: Audit save failed.", e);
+                console.error("SafeShip Cloud: Save failed.", e);
             }
         };
     </script>
@@ -331,19 +325,17 @@
             const statusPulse = document.getElementById('statusPulse');
             const statusLabel = document.getElementById('statusLabel');
             
-            // A key is linked if it is not the placeholder __ string
+            // A key is linked if it is not the placeholder __ string and not empty
             const isGeminiLinked = keys.gemini && keys.gemini !== "" && !keys.gemini.startsWith("__");
 
             if (isGeminiLinked) {
                 statusPulse.className = "w-2 h-2 rounded-full bg-emerald-500 animate-link shadow-[0_0_8px_rgba(16,185,129,0.5)]";
                 statusLabel.innerText = "Neural Linked";
                 statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-emerald-500";
-                console.log("SafeShip Node: Neural Link Established.");
             } else {
                 statusPulse.className = "w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]";
                 statusLabel.innerText = "Neural Link Failed";
                 statusLabel.className = "text-[10px] font-black uppercase tracking-widest text-rose-500";
-                console.warn("SafeShip Node: Neural Link Failed. Missing or rejected API Key.");
             }
         }
 
@@ -400,7 +392,7 @@
             try {
                 const keys = window.SAFESHIP_CONTEXT.sessionKeys;
                 if (!keys.gemini || keys.gemini === "" || keys.gemini.startsWith("__")) 
-                    throw new Error("Neural Nodes Inactive: Ensure your Gemini API Key is set correctly in GitHub Secrets or the environment.");
+                    throw new Error("Neural Nodes Inactive: Ensure your Gemini API Key is set correctly.");
 
                 let reportData;
                 if (auditMode === 'url') {
@@ -419,7 +411,6 @@
                     reportData.target = "Repository Trace";
                 }
 
-                // Follow Rule 1: Public/Private structure is handled via appId and userId logic inside the helper
                 await window.saveAuditToCloud(reportData);
                 renderResults(reportData);
             } catch (err) {
@@ -470,7 +461,7 @@
             const response = await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
             const data = await response.json();
             if (data.error) throw new Error(data.error.message);
-            if (!data.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("Neural Engine failed to generate response parts.");
+            if (!data.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("Neural Engine failed to generate response.");
             return JSON.parse(data.candidates[0].content.parts[0].text);
         }
 
@@ -486,12 +477,12 @@
                         <span class="text-[10px] font-black uppercase text-zinc-500 tracking-[0.3em]">Trace Verdict</span>
                         <h3 class="text-6xl font-bold tracking-tighter">${data.score}%</h3>
                     </div>
-                    <button onclick="exportJSON(${JSON.stringify(data).replace(/"/g, '&quot;')})" class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-400 hover:text-emerald-500 transition-colors"><i data-lucide="download"></i></button>
+                    <button onclick="exportJSON(${JSON.stringify(data).replace(/"/g, '&quot;')})" class="p-3 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-400 hover:text-emerald-500"><i data-lucide="download"></i></button>
                 </div>
-                <div class="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-[2rem] text-sm text-zinc-400 leading-relaxed">${data.summary}</div>
+                <div class="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-[2rem] text-sm text-zinc-400">${data.summary}</div>
                 <div class="space-y-4">
                     ${data.findings.map(f => `
-                        <div class="bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6 group transition-all hover:border-zinc-700">
+                        <div class="bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6 transition-all hover:border-zinc-700">
                             <h4 class="font-bold text-white mb-2">${f.title}</h4>
                             <p class="text-xs text-zinc-500 font-mono mb-2">${f.location}</p>
                             <p class="text-sm text-zinc-400 mb-4">${f.description}</p>
@@ -529,7 +520,7 @@
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url; a.download = `safeship-report-${Date.now()}.json`; a.click();
+            a.href = url; a.download = `report-${Date.now()}.json`; a.click();
         }
 
         window.onload = () => { 
