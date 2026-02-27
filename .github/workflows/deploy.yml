@@ -1,36 +1,33 @@
-# File: .github/workflows/deploy.yml
-# Description: Automated deployment to GitHub Pages
-
-name: Deploy SafeShip
+name: Inject Secrets and Deploy
 
 on:
   push:
-    branches: ["main"]
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+    branches:
+      - main # Or your default branch
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
-      
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
 
-      - name: Upload Artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Inject Neural Secrets
+        run: |
+          # Replace Gemini Placeholder
+          sed -i "s|__GEMINI_API_KEY__|${{ secrets.GEMINI_API_KEY }}|g" index.html
+          
+          # Replace Groq Placeholder
+          sed -i "s|__GROQ_API_KEY__|${{ secrets.GROQ_API_KEY }}|g" index.html
+          
+          # Replace Firebase Config Placeholder
+          # Note: We use a different delimiter because JSON contains slashes
+          sed -i "s|__firebase_config|'${{ secrets.FIREBASE_CONFIG }}'|g" index.html
+
+      - name: Deploy to GitHub Pages (or other provider)
+        # Use your preferred deployment action here
+        # Example for GitHub Pages:
+        uses: peaceiris/actions-gh-pages@v3
         with:
-          # This uploads the entire root directory (containing index.html)
-          path: '.'
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
