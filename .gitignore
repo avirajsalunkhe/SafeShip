@@ -1,0 +1,20 @@
+Ignore the environment file containing your real API keys
+
+.env
+
+Ignore Python cache files
+
+pycache/
+*.pyc
+*.pyo
+*.pyd
+
+Ignore local history/config files
+
+.vscode/
+.idea/
+
+Ignore the build artifacts if you have any
+
+dist/
+build/
