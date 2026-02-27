@@ -19,7 +19,7 @@
         // They are plain JS variables so the module script below can read them.
         var INJECTED_GEMINI_KEY = "__GEMINI_API_KEY__";
         var INJECTED_GROQ_KEY   = "__GROQ_API_KEY__";
-        var INJECTED_FIREBASE   = '__FIREBASE_CONFIG_JSON__';
+        var INJECTED_FIREBASE   = __FIREBASE_CONFIG_JSON__;
     </script>
 
     <script type="module">
@@ -37,20 +37,19 @@
         // The deploy.yml pipeline replaces the __PLACEHOLDER__ strings inside the
         // INJECTED_* variables above with real secret values.
         // We check: if the value still looks like a placeholder → key not injected.
-        const isInjected = (val) => val && val !== "" && !val.startsWith("__") && !val.endsWith("__");
+        // String keys: valid if not empty and not still a placeholder
+        const isInjected = (val) => typeof val === 'string' && val !== "" && !val.startsWith("__") && !val.endsWith("__");
 
         const getGeminiKey = () => isInjected(window.INJECTED_GEMINI_KEY) ? window.INJECTED_GEMINI_KEY : null;
         const getGroqKey   = () => isInjected(window.INJECTED_GROQ_KEY)   ? window.INJECTED_GROQ_KEY   : null;
 
         const getFirebaseConfig = () => {
             const raw = window.INJECTED_FIREBASE;
-            if (!isInjected(raw)) return null;
-            try {
-                return typeof raw === 'object' ? raw : JSON.parse(raw);
-            } catch (e) {
-                neuralTelemetry("Firebase", "Config parse error", e);
-                return null;
-            }
+            // After deploy injection, INJECTED_FIREBASE is a JS object literal (no quotes).
+            // Before injection (local/raw), it is the placeholder string "__FIREBASE_CONFIG_JSON__".
+            if (!raw || typeof raw === 'string') return null;  // still a placeholder string → not injected
+            if (typeof raw === 'object' && raw.apiKey) return raw;
+            return null;
         };
         // ───────────────────────────────────────────────────────────────────────
 
