@@ -25,30 +25,43 @@ jobs:
           FB_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
         run: |
             import os
+            import sys
 
             filename = 'index.html'
+            if not os.path.exists(filename):
+                print(f"[!] CRITICAL: {filename} not found in root directory.")
+                sys.exit(1)
+
             with open(filename, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            # Replacing placeholders with actual secrets from GitHub vault
-            # Python variables are used to prevent terminal escaping errors
+            # Mapping GitHub Secrets to internal placeholders
             replacements = {
                 '__GEMINI_API_KEY__': os.environ.get('GEMINI_KEY', ''),
                 '__GROQ_API_KEY__': os.environ.get('GROQ_KEY', ''),
                 '__FIREBASE_CONFIG_JSON__': os.environ.get('FB_CONFIG', '{}')
             }
 
+            # Neural Integrity Check
+            failed_injection = False
             for placeholder, value in replacements.items():
-                if not value or value.strip() == "":
-                    print(f"[!] TELEMETRY ALERT: {placeholder} is EMPTY in GitHub Secrets.")
+                if not value or value.strip() == "" or value == "{}":
+                    print(f"[!] TELEMETRY ALERT: Secret for {placeholder} is missing or empty.")
+                    # We don't exit yet to allow the script to report all missing secrets
+                    failed_injection = True
                 else:
-                    print(f"[*] TELEMETRY: Injected secret into {placeholder}.")
+                    print(f"[*] TELEMETRY: Successfully prepared injection for {placeholder}.")
+                
                 content = content.replace(placeholder, value)
+
+            if failed_injection:
+                print("[!] DEPLOYMENT ABORTED: One or more critical Neural Nodes are missing secrets.")
+                sys.exit(1)
 
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(content)
             
-            print("[*] Handshake Success: index.html prepared for production.")
+            print("[*] Handshake Success: index.html production-ready.")
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
