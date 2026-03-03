@@ -929,39 +929,20 @@ ${schema}`;
     const base = (window.WORKER_URL || '').replace(/\/$/, '');
     if (!base || base === '__WORKER_URL__') throw new Error('Server proxy not configured.');
 
-    // Try Gemini first via server.js proxy
-    try {
-        const res = await fetch(`${base}/gemini`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: { responseMimeType: 'application/json' }
-            })
-        });
-        if (!res.ok) throw new Error(`Gemini ${res.status}`);
-        const d = await res.json();
-        if (d.error) throw new Error(d.error);
-        return JSON.parse(d.candidates[0].content.parts[0].text);
-    } catch (e) {
-        neuralTelemetry('Engine', 'Gemini failed, switching to Groq: ' + e.message);
-    }
-
-    // Fallback: Groq via server.js proxy
-    const res = await fetch(`${base}/groq`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [{ role: 'user', content: prompt }],
-            response_format: { type: 'json_object' }
-        })
+    // Single call to /audit — server handles Gemini→Groq fallback automatically
+    const res = await fetch(`${base}/audit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
     });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(`Groq ${res.status}: ${err?.error?.message || 'failed'}`);
-    }
+
     const d = await res.json();
-    if (d.error) throw new Error(d.error);
-    return JSON.parse(d.choices[0].message.content);
+
+    if (!res.ok) {
+        throw new Error(d.error || `Server error ${res.status}`);
+    }
+    neuralTelemetry('Engine', `Response via ${d.engine}`);
+    return d.result;
 };
     lucide.createIcons();
 </script>
