@@ -17,22 +17,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # ── Deploy server.js to Cloudflare Worker ──────────────────────────
-      # This runs FIRST so the Worker URL is always up before the site deploys.
-      - name: Deploy server.js to Cloudflare Worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          wranglerVersion: '3'
-          command: deploy server.js --name safeship-server --compatibility-date 2024-01-01
-
-      # ── Inject WORKER_URL + Firebase into index.html ───────────────────
-      # API keys are NEVER touched here. They live only in Cloudflare Worker env vars.
-      - name: Inject Config into index.html
+      # ── Inject Firebase config only ────────────────────────────────────
+      # WORKER_URL is hardcoded in index.html (it's a URL, not a secret — safe to expose)
+      # GEMINI_API_KEY and GROQ_API_KEY live only in Cloudflare Worker env vars (never here)
+      - name: Inject Firebase Config
         shell: python
         env:
           FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
-          WORKER_URL: ${{ secrets.WORKER_URL }}
         run: |
             import os, sys, json, re
 
@@ -45,20 +36,8 @@ jobs:
                 content = f.read()
 
             firebase_raw = os.environ.get('FIREBASE_CONFIG', '').strip()
-            worker_url   = os.environ.get('WORKER_URL', '').strip()
 
-            # ── Worker URL ───────────────────────────────────────────────
-            if not worker_url:
-                print("[!] CRITICAL: WORKER_URL secret is empty.")
-                print("[!] Add WORKER_URL to GitHub Secrets (your Cloudflare Worker URL).")
-                sys.exit(1)
-            if '__WORKER_URL__' in content:
-                content = content.replace('__WORKER_URL__', worker_url)
-                print(f"[*] WORKER_URL injected OK")
-            else:
-                print("[!] WARNING: __WORKER_URL__ placeholder missing in index.html")
-
-            # ── Firebase config (optional) ───────────────────────────────
+            # ── Parse Firebase config ──────────────────────────────────────
             firebase_object = 'null'
             if firebase_raw and firebase_raw != '{}':
                 try:
@@ -72,20 +51,20 @@ jobs:
                     firebase_object = json.dumps(parsed)
                     print(f"[*] Firebase OK — projectId: {parsed.get('projectId', 'unknown')}")
                 except Exception as e:
-                    print(f"[!] Firebase parse FAILED: {e} — standalone mode.")
+                    print(f"[!] Firebase parse FAILED: {e} — running in standalone mode.")
             else:
-                print("[!] FIREBASE_CONFIG empty — standalone mode.")
+                print("[!] FIREBASE_CONFIG empty — standalone mode (no history persistence).")
 
             if '__FIREBASE_CONFIG_JSON__' in content:
                 content = content.replace('__FIREBASE_CONFIG_JSON__', firebase_object)
                 print(f"[*] Firebase injected: {'OK' if firebase_object != 'null' else 'null (standalone)'}")
             else:
-                print("[!] WARNING: __FIREBASE_CONFIG_JSON__ placeholder missing in index.html")
+                print("[!] WARNING: __FIREBASE_CONFIG_JSON__ placeholder not found in index.html")
 
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(content)
 
-            print("[*] Handshake Complete. Keys secured in Cloudflare Worker.")
+            print("[*] Deploy prep complete.")
 
       # ── Deploy to GitHub Pages ─────────────────────────────────────────
       - name: Deploy to GitHub Pages
