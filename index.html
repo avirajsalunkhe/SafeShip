@@ -9,10 +9,12 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
 
-   <script>
-    var WORKER_URL        = "https://safeship.avirajsalunkhe1.workers.dev/";
-    var INJECTED_FIREBASE = {"apiKey": "AIzaSyB_d7N2FTeD0mrO-odMx2ajwtVIHOOKig0", "authDomain": "safeship-trace.firebaseapp.com", "projectId": "safeship-trace", "storageBucket": "safeship-trace.firebasestorage.app", "messagingSenderId": "538497558292", "appId": "1:538497558292:web:0e512311b343b5ec1f0401", "measurementId": "G-Z097L20KCF"};
-</script>
+    <script>
+        // ✅ SECURE: No API keys here. All AI calls go through server.js (Cloudflare Worker).
+        // Only the Worker URL and Firebase config are injected at build time.
+        var WORKER_URL        = "https://safeship.avirajsalunkhe1.workers.dev";
+        var INJECTED_FIREBASE = {"apiKey": "AIzaSyB_d7N2FTeD0mrO-odMx2ajwtVIHOOKig0", "authDomain": "safeship-trace.firebaseapp.com", "projectId": "safeship-trace", "storageBucket": "safeship-trace.firebasestorage.app", "messagingSenderId": "538497558292", "appId": "1:538497558292:web:0e512311b343b5ec1f0401", "measurementId": "G-Z097L20KCF"};
+    </script>
 
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -49,7 +51,6 @@
         .logo-icon { width: 32px; height: 32px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .logo-icon svg { color: #000; width: 18px; height: 18px; }
         .logo-text { font-size: 15px; font-weight: 800; letter-spacing: -0.5px; }
-
         .sidebar-nav { padding: 8px; border-bottom: 1px solid var(--border); }
         .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; color: var(--muted); transition: all 0.15s; border: 1px solid transparent; }
         .nav-item:hover { background: var(--accent-dim); color: var(--text); }
@@ -57,7 +58,6 @@
         .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
         .nav-badge { margin-left: auto; font-family: var(--font-mono); font-size: 9px; padding: 2px 6px; border-radius: 4px; background: var(--border); color: var(--muted); }
         .nav-badge.new { background: rgba(0,255,136,0.15); color: var(--accent); }
-
         .sidebar-section-title { font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px; color: var(--muted); padding: 16px 20px 8px; text-transform: uppercase; }
         .history-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         .history-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: all 0.15s; position: relative; margin-bottom: 4px; }
@@ -67,7 +67,6 @@
         .history-date { font-family: var(--font-mono); font-size: 9px; color: var(--muted); }
         .history-delete { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); opacity: 0; transition: opacity 0.15s; color: var(--danger); cursor: pointer; }
         .history-item:hover .history-delete { opacity: 1; }
-
         .sidebar-footer { padding: 12px; border-top: 1px solid var(--border); }
         .credit-footer { margin-top: 2px; }
         .credit-divider { height: 1px; background: linear-gradient(to right, transparent, var(--accent-border), transparent); margin-bottom: 10px; }
@@ -87,7 +86,6 @@
         .tab-btn { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 6px 14px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; background: transparent; color: var(--muted); transition: all 0.15s; text-transform: uppercase; }
         .tab-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-border); }
         .tab-btn:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.04); }
-
         .status-pill { display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface); }
         .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-bright); }
         .status-dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse-dot 2s infinite; }
@@ -100,12 +98,10 @@
         .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; }
         .section-title { font-size: 28px; font-weight: 800; letter-spacing: -1px; line-height: 1.1; margin-bottom: 20px; }
         .section-title span { color: var(--accent); }
-
         .input-row { display: flex; gap: 10px; }
         .text-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-family: var(--font-mono); font-size: 13px; color: var(--text); outline: none; transition: border-color 0.15s; }
         .text-input:focus { border-color: var(--accent-border); }
         .text-input::placeholder { color: var(--muted); }
-
         .btn-primary { background: var(--accent); color: #000; font-family: var(--font-display); font-weight: 800; font-size: 12px; letter-spacing: 1px; padding: 12px 24px; border-radius: 10px; border: none; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
         .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
         .btn-primary:active { transform: translateY(0); }
@@ -136,7 +132,7 @@
         .file-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
         .file-chip { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
 
-        /* Code input textarea */
+        /* Code textarea */
         .code-textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text); outline: none; resize: vertical; min-height: 160px; transition: border-color 0.15s; line-height: 1.6; }
         .code-textarea:focus { border-color: var(--accent-border); }
         .code-textarea::placeholder { color: var(--muted); }
@@ -166,10 +162,8 @@
         .score-label { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
         .score-grade { font-size: 22px; font-weight: 800; }
         .score-summary { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 4px; }
-
         .findings-header { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
         .findings-header span { background: var(--border); border-radius: 4px; padding: 2px 8px; color: var(--text); }
-
         .finding-card { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 10px; transition: border-color 0.15s; }
         .finding-card:hover { border-color: var(--border-bright); }
         .finding-card.severity-critical { border-left: 3px solid var(--danger); }
@@ -185,14 +179,12 @@
         .finding-fix { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
         .fix-label { font-family: var(--font-mono); font-size: 9px; color: var(--accent); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px; }
         .fix-code { font-family: var(--font-mono); font-size: 11px; color: #a8d8b0; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
-
         .severity-badge { font-family: var(--font-mono); font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 4px; white-space: nowrap; letter-spacing: 1px; flex-shrink: 0; }
         .badge-critical { background: rgba(255,59,59,0.15); color: var(--danger); }
         .badge-high { background: rgba(255,123,59,0.15); color: #ff7b3b; }
         .badge-medium { background: rgba(255,184,0,0.15); color: var(--warn); }
         .badge-low { background: rgba(59,158,255,0.15); color: var(--info); }
         .badge-info { background: rgba(90,96,96,0.2); color: var(--muted); }
-
         .stats-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
         .stat-box { flex: 1; min-width: 80px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
         .stat-num { font-size: 22px; font-weight: 800; letter-spacing: -1px; }
@@ -203,8 +195,6 @@
         .filter-btn { font-family: var(--font-mono); font-size: 9px; font-weight: 700; padding: 4px 10px; border-radius: 5px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; transition: all 0.15s; letter-spacing: 1px; text-transform: uppercase; }
         .filter-btn.active { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
         .filter-count { font-family: var(--font-mono); font-size: 9px; color: var(--muted); margin-left: auto; }
-
-        /* Export bar */
         .export-bar { display: flex; gap: 8px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
 
         /* Idle */
@@ -240,9 +230,7 @@
         <div class="sidebar-header">
             <div class="logo">
                 <div class="logo-icon"><i data-lucide="shield-check"></i></div>
-                <div>
-                    <div class="logo-text">SafeShip</div>
-                </div>
+                <div><div class="logo-text">SafeShip</div></div>
             </div>
         </div>
 
@@ -415,7 +403,7 @@
                 </div>
             </div>
 
-            <!-- RESULTS AREA (shared across all tabs) -->
+            <!-- RESULTS AREA -->
             <div id="resultsArea">
                 <div id="idleState">
                     <i data-lucide="activity" class="idle-icon" style="width:36px;height:36px"></i>
@@ -429,9 +417,9 @@
                 <div id="contentState" style="display:none"></div>
             </div>
 
-        </div><!-- /content -->
-    </div><!-- /main -->
-</div><!-- /app -->
+        </div>
+    </div>
+</div>
 
 <script>
     /* ─── STATE ─────────────────────────────────────────────────────── */
@@ -451,12 +439,12 @@
         resetResults();
     }
 
-    /* ─── CHECK CHIPS toggle ────────────────────────────────────────── */
+    /* ─── CHECK CHIPS ───────────────────────────────────────────────── */
     document.querySelectorAll('.check-chip').forEach(chip => {
         chip.addEventListener('click', () => chip.classList.toggle('active'));
     });
 
-    /* ─── LANG CHIPS (single select) ───────────────────────────────── */
+    /* ─── LANG CHIPS ────────────────────────────────────────────────── */
     document.querySelectorAll('#langGrid .lang-chip').forEach(chip => {
         chip.addEventListener('click', () => {
             document.querySelectorAll('#langGrid .lang-chip').forEach(c => c.classList.remove('active'));
@@ -474,8 +462,7 @@
     function handleDrop(e) {
         e.preventDefault();
         document.getElementById('dropzone').classList.remove('drag-over');
-        const files = Array.from(e.dataTransfer.files);
-        processFiles(files);
+        processFiles(Array.from(e.dataTransfer.files));
     }
     function handleFiles(e) { processFiles(Array.from(e.target.files)); }
     function processFiles(files) {
@@ -492,7 +479,7 @@
         });
     }
 
-    /* ─── GET ACTIVE CHECKS ────────────────────────────────────────── */
+    /* ─── GET ACTIVE CHECKS ─────────────────────────────────────────── */
     function getActiveChecks(containerId) {
         return Array.from(document.querySelectorAll(`#${containerId} .check-chip.active`))
             .map(c => c.dataset.check);
@@ -500,11 +487,8 @@
 
     /* ─── BUILD PROMPT ──────────────────────────────────────────────── */
     function buildPrompt(mode) {
-        const checks = mode === 'url'
-            ? getActiveChecks('urlChecks')
-            : getActiveChecks('sastChecks');
+        const checks = mode === 'url' ? getActiveChecks('urlChecks') : getActiveChecks('sastChecks');
         const checksStr = checks.join(', ');
-
         const schema = `Respond ONLY with a valid JSON object exactly matching this schema:
 {
   "score": <integer 0-100>,
@@ -528,54 +512,24 @@
 
         if (mode === 'url') {
             const url = document.getElementById('urlInput').value.trim();
-            return `You are a professional web security auditor. Perform a comprehensive security analysis of this URL: ${url}
-
-Focus on these specific checks: ${checksStr}
-
-For each issue found, provide: what it is, where it likely exists, the security impact, a concrete fix with example code, and the relevant CWE identifier.
-Be thorough and realistic — analyze headers, authentication, input handling, API design, CORS, SSL/TLS, rate limiting, and all specified checks.
-
-${schema}`;
+            return `You are a professional web security auditor. Perform a comprehensive security analysis of this URL: ${url}\n\nFocus on these specific checks: ${checksStr}\n\nFor each issue found, provide: what it is, where it likely exists, the security impact, a concrete fix with example code, and the relevant CWE identifier.\nBe thorough and realistic — analyze headers, authentication, input handling, API design, CORS, SSL/TLS, rate limiting, and all specified checks.\n\n${schema}`;
         }
 
         const lang = mode === 'paste'
-            ? document.getElementById('pastelang')?.value || 'auto'
+            ? (document.getElementById('pasteLang')?.value || 'auto')
             : (document.querySelector('#langGrid .lang-chip.active')?.dataset.lang || 'auto');
 
         const code = mode === 'paste'
             ? document.getElementById('pasteInput').value
             : window.SAFESHIP_CONTEXT.currentFiles.map(f => `// FILE: ${f.name}\n${f.content}`).join('\n\n---\n\n');
 
-        return `You are an expert SAST (Static Application Security Testing) engine. Perform a deep security audit of the following ${lang !== 'auto' ? lang : 'code (auto-detect language)'}.
-
-Focus on these vulnerability categories: ${checksStr}
-
-Language context: ${lang !== 'auto' ? `This is ${lang} code` : 'Auto-detect the language and apply language-specific security checks'}
-
-Apply language-specific security knowledge:
-- For JavaScript/TypeScript: prototype pollution, eval(), DOM XSS, unsafe npm packages patterns
-- For Python: pickle deserialization, eval/exec, SQL string formatting, os.system calls
-- For PHP: file inclusion, extract(), type juggling, unsafe deserialization
-- For Java: JNDI injection, Java deserialization, XXE, reflection misuse
-- For Go: race conditions, unsafe pointer usage, integer overflow
-- For Solidity: reentrancy, integer overflow/underflow, front-running, tx.origin auth
-- For SQL: injection patterns, excessive permissions, data exposure
-- For Shell: command injection, unquoted variables, wildcard injection
-
-For each finding: exact location (file, line number, function name), precise impact, and a concrete fix with corrected code example.
-
-CODE TO AUDIT:
-\`\`\`
-${code}
-\`\`\`
-
-${schema}`;
+        return `You are an expert SAST (Static Application Security Testing) engine. Perform a deep security audit of the following ${lang !== 'auto' ? lang : 'code (auto-detect language)'}.\n\nFocus on these vulnerability categories: ${checksStr}\n\nLanguage context: ${lang !== 'auto' ? `This is ${lang} code` : 'Auto-detect the language and apply language-specific security checks'}\n\nApply language-specific security knowledge:\n- For JavaScript/TypeScript: prototype pollution, eval(), DOM XSS, unsafe npm packages patterns\n- For Python: pickle deserialization, eval/exec, SQL string formatting, os.system calls\n- For PHP: file inclusion, extract(), type juggling, unsafe deserialization\n- For Java: JNDI injection, Java deserialization, XXE, reflection misuse\n- For Go: race conditions, unsafe pointer usage, integer overflow\n- For Solidity: reentrancy, integer overflow/underflow, front-running, tx.origin auth\n- For SQL: injection patterns, excessive permissions, data exposure\n- For Shell: command injection, unquoted variables, wildcard injection\n\nFor each finding: exact location (file, line number, function name), precise impact, and a concrete fix with corrected code example.\n\nCODE TO AUDIT:\n\`\`\`\n${code}\n\`\`\`\n\n${schema}`;
     }
 
     /* ─── LOADING STEPS ─────────────────────────────────────────────── */
     const LOADING_STEPS = {
-        url: ['Resolving target endpoint', 'Analyzing HTTP surface', 'Running security checks', 'Compiling findings'],
-        code: ['Parsing file structure', 'Detecting language patterns', 'Running SAST engine', 'Generating report'],
+        url:   ['Resolving target endpoint', 'Analyzing HTTP surface', 'Running security checks', 'Compiling findings'],
+        code:  ['Parsing file structure', 'Detecting language patterns', 'Running SAST engine', 'Generating report'],
         paste: ['Parsing code structure', 'Detecting language', 'Analyzing vulnerabilities', 'Compiling findings']
     };
 
@@ -584,8 +538,8 @@ ${schema}`;
         document.getElementById('contentState').style.display = 'none';
         const ld = document.getElementById('loadingState'); ld.style.display = 'flex';
         const steps = document.getElementById('loadingSteps');
-        steps.innerHTML = LOADING_STEPS[mode].map((s, i) => `
-            <div class="loading-step" id="lstep-${i}"><span class="step-dot"></span>${s}</div>`).join('');
+        steps.innerHTML = LOADING_STEPS[mode].map((s, i) =>
+            `<div class="loading-step" id="lstep-${i}"><span class="step-dot"></span>${s}</div>`).join('');
         let i = 0;
         const advance = () => {
             if (i > 0) document.getElementById(`lstep-${i-1}`)?.classList.replace('active','done');
@@ -600,10 +554,11 @@ ${schema}`;
     }
 
     /* ─── START AUDIT ───────────────────────────────────────────────── */
+    // ✅ FIXED: removed old sessionKeys check — Worker handles all keys now
     async function startAudit(mode) {
-        const keys = window.SAFESHIP_CONTEXT?.sessionKeys;
-        if (!keys?.gemini && !keys?.groq) {
-            alert('No API keys found. Check deployment pipeline logs and GitHub Secrets.');
+        const workerUrl = window.WORKER_URL;
+        if (!workerUrl || workerUrl === 'https://safeship.avirajsalunkhe1.workers.dev') {
+            alert('Server not configured. Check WORKER_URL in GitHub Secrets and redeploy.');
             return;
         }
         if (mode === 'paste' && !document.getElementById('pasteInput').value.trim()) {
@@ -616,10 +571,9 @@ ${schema}`;
         const timer = showLoading(mode);
         try {
             const prompt = buildPrompt(mode);
-            const data = await callNeuralNode(prompt);
+            const data = await window.callNeuralNode(prompt);
             clearTimeout(timer);
 
-            // Label the target
             data.target = mode === 'url'
                 ? document.getElementById('urlInput').value.trim()
                 : mode === 'paste' ? 'Pasted Code Snippet'
@@ -647,7 +601,7 @@ ${schema}`;
 
     function severityClass(sev) {
         const s = (sev || '').toLowerCase();
-        return { critical: 'severity-critical badge-critical', high: 'severity-high badge-high', medium: 'severity-medium badge-medium', low: 'severity-low badge-low', info: 'severity-info badge-info' }[s] || 'severity-info badge-info';
+        return { critical:'severity-critical badge-critical', high:'severity-high badge-high', medium:'severity-medium badge-medium', low:'severity-low badge-low', info:'severity-info badge-info' }[s] || 'severity-info badge-info';
     }
 
     function renderResults(d, filter = 'all') {
@@ -661,13 +615,12 @@ ${schema}`;
         const color = getScoreColor(score);
         const circumference = 2 * Math.PI * 44;
         const dash = circumference * (score / 100);
-        const stats = d.stats || { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-        const findings = (d.findings || []);
+        const stats = d.stats || { critical:0, high:0, medium:0, low:0, info:0 };
+        const findings = d.findings || [];
         const filtered = filter === 'all' ? findings : findings.filter(f => (f.severity||'').toLowerCase() === filter);
 
         ct.innerHTML = `
         <div class="card fade-in">
-            <!-- Score header -->
             <div class="score-header">
                 <div class="score-ring-wrap">
                     <svg viewBox="0 0 100 100" width="100" height="100">
@@ -694,74 +647,54 @@ ${schema}`;
                 </div>
             </div>
 
-            <!-- Stats row -->
             <div class="stats-row">
-                <div class="stat-box" style="border-color:rgba(255,59,59,0.3)">
-                    <div class="stat-num" style="color:var(--danger)">${stats.critical || 0}</div>
-                    <div class="stat-lbl">Critical</div>
-                </div>
-                <div class="stat-box" style="border-color:rgba(255,123,59,0.3)">
-                    <div class="stat-num" style="color:#ff7b3b">${stats.high || 0}</div>
-                    <div class="stat-lbl">High</div>
-                </div>
-                <div class="stat-box" style="border-color:rgba(255,184,0,0.3)">
-                    <div class="stat-num" style="color:var(--warn)">${stats.medium || 0}</div>
-                    <div class="stat-lbl">Medium</div>
-                </div>
-                <div class="stat-box" style="border-color:rgba(59,158,255,0.3)">
-                    <div class="stat-num" style="color:var(--info)">${stats.low || 0}</div>
-                    <div class="stat-lbl">Low</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-num" style="color:var(--muted)">${stats.info || 0}</div>
-                    <div class="stat-lbl">Info</div>
-                </div>
-                <div class="stat-box" style="border-color:var(--accent-border)">
-                    <div class="stat-num" style="color:var(--accent)">${findings.length}</div>
-                    <div class="stat-lbl">Total</div>
-                </div>
+                <div class="stat-box" style="border-color:rgba(255,59,59,0.3)"><div class="stat-num" style="color:var(--danger)">${stats.critical||0}</div><div class="stat-lbl">Critical</div></div>
+                <div class="stat-box" style="border-color:rgba(255,123,59,0.3)"><div class="stat-num" style="color:#ff7b3b">${stats.high||0}</div><div class="stat-lbl">High</div></div>
+                <div class="stat-box" style="border-color:rgba(255,184,0,0.3)"><div class="stat-num" style="color:var(--warn)">${stats.medium||0}</div><div class="stat-lbl">Medium</div></div>
+                <div class="stat-box" style="border-color:rgba(59,158,255,0.3)"><div class="stat-num" style="color:var(--info)">${stats.low||0}</div><div class="stat-lbl">Low</div></div>
+                <div class="stat-box"><div class="stat-num" style="color:var(--muted)">${stats.info||0}</div><div class="stat-lbl">Info</div></div>
+                <div class="stat-box" style="border-color:var(--accent-border)"><div class="stat-num" style="color:var(--accent)">${findings.length}</div><div class="stat-lbl">Total</div></div>
             </div>
 
-            <!-- Filter bar -->
             <div class="filter-bar">
-                ${['all','critical','high','medium','low','info'].map(f => `
-                    <button class="filter-btn ${activeFilter===f?'active':''}" onclick="applyFilter('${f}')">${f.toUpperCase()}</button>`).join('')}
-                <span class="filter-count" class="mono">${filtered.length} FINDINGS</span>
+                ${['all','critical','high','medium','low','info'].map(f =>
+                    `<button class="filter-btn ${activeFilter===f?'active':''}" onclick="applyFilter('${f}')">${f.toUpperCase()}</button>`).join('')}
+                <span class="filter-count">${filtered.length} FINDINGS</span>
             </div>
 
-            <!-- Findings -->
             <div id="findingsList">
-                ${filtered.length === 0 ? `<div style="text-align:center;padding:32px;font-family:var(--font-mono);font-size:11px;color:var(--muted)">NO FINDINGS FOR THIS FILTER</div>` :
-                filtered.map((f, i) => {
-                    const sClasses = severityClass(f.severity);
-                    const cardClass = sClasses.split(' ')[0];
-                    const badgeClass = sClasses.split(' ')[1];
-                    return `
-                    <div class="finding-card ${cardClass}" id="finding-${i}">
-                        <div class="finding-header" onclick="toggleFinding(${i})">
-                            <div>
-                                <div class="finding-title">${f.title}</div>
-                                ${f.cwe ? `<div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);margin-top:3px">${f.cwe} · ${f.category||''}</div>` : ''}
+                ${filtered.length === 0
+                    ? `<div style="text-align:center;padding:32px;font-family:var(--font-mono);font-size:11px;color:var(--muted)">NO FINDINGS FOR THIS FILTER</div>`
+                    : filtered.map((f, i) => {
+                        const sClasses = severityClass(f.severity);
+                        const cardClass = sClasses.split(' ')[0];
+                        const badgeClass = sClasses.split(' ')[1];
+                        return `
+                        <div class="finding-card ${cardClass}" id="finding-${i}">
+                            <div class="finding-header" onclick="toggleFinding(${i})">
+                                <div>
+                                    <div class="finding-title">${f.title}</div>
+                                    ${f.cwe ? `<div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);margin-top:3px">${f.cwe} · ${f.category||''}</div>` : ''}
+                                </div>
+                                <div style="display:flex;align-items:center;gap:8px">
+                                    <span class="severity-badge ${badgeClass}">${(f.severity||'info').toUpperCase()}</span>
+                                    <i data-lucide="chevron-down" class="finding-toggle" style="width:14px;height:14px"></i>
+                                </div>
                             </div>
-                            <div style="display:flex;align-items:center;gap:8px">
-                                <span class="severity-badge ${badgeClass}">${(f.severity||'info').toUpperCase()}</span>
-                                <i data-lucide="chevron-down" class="finding-toggle" style="width:14px;height:14px"></i>
+                            <div class="finding-body">
+                                <div class="finding-location"><i data-lucide="map-pin" style="width:10px;height:10px;display:inline;vertical-align:middle;margin-right:4px"></i>${f.location || 'Location unknown'}</div>
+                                <div class="finding-desc">${f.description}</div>
+                                ${f.impact ? `<div style="background:rgba(255,59,59,0.06);border:1px solid rgba(255,59,59,0.15);border-radius:8px;padding:10px;margin-bottom:12px">
+                                    <div style="font-family:var(--font-mono);font-size:9px;color:var(--danger);letter-spacing:1px;margin-bottom:4px">⚡ IMPACT</div>
+                                    <div style="font-size:12px;color:var(--muted)">${f.impact}</div>
+                                </div>` : ''}
+                                <div class="finding-fix">
+                                    <div class="fix-label">✦ Recommended Fix</div>
+                                    <pre class="fix-code">${f.fix}</pre>
+                                </div>
                             </div>
-                        </div>
-                        <div class="finding-body">
-                            <div class="finding-location"><i data-lucide="map-pin" style="width:10px;height:10px;display:inline;vertical-align:middle;margin-right:4px"></i>${f.location || 'Location unknown'}</div>
-                            <div class="finding-desc">${f.description}</div>
-                            ${f.impact ? `<div style="background:rgba(255,59,59,0.06);border:1px solid rgba(255,59,59,0.15);border-radius:8px;padding:10px;margin-bottom:12px">
-                                <div style="font-family:var(--font-mono);font-size:9px;color:var(--danger);letter-spacing:1px;margin-bottom:4px">⚡ IMPACT</div>
-                                <div style="font-size:12px;color:var(--muted)">${f.impact}</div>
-                            </div>` : ''}
-                            <div class="finding-fix">
-                                <div class="fix-label">✦ Recommended Fix</div>
-                                <pre class="fix-code">${f.fix}</pre>
-                            </div>
-                        </div>
-                    </div>`;
-                }).join('')}
+                        </div>`;
+                    }).join('')}
             </div>
         </div>`;
         lucide.createIcons();
@@ -770,16 +703,8 @@ ${schema}`;
     function getGradeLabel(g) {
         return { A:'Excellent', B:'Good', C:'Fair', D:'Poor', F:'Critical' }[g] || '';
     }
-
-    function applyFilter(f) {
-        activeFilter = f;
-        if (lastResult) renderResults(lastResult, f);
-    }
-
-    function toggleFinding(i) {
-        document.getElementById('finding-' + i)?.classList.toggle('expanded');
-        lucide.createIcons();
-    }
+    function applyFilter(f) { activeFilter = f; if (lastResult) renderResults(lastResult, f); }
+    function toggleFinding(i) { document.getElementById('finding-'+i)?.classList.toggle('expanded'); lucide.createIcons(); }
 
     /* ─── EXPORT ────────────────────────────────────────────────────── */
     function exportJSON() {
@@ -788,12 +713,11 @@ ${schema}`;
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
         a.download = `safeship-audit-${Date.now()}.json`; a.click();
     }
-
     function exportMarkdown() {
         if (!lastResult) return;
         const d = lastResult;
-        let md = `# SafeShip Security Report\n\n**Score:** ${d.score}/100 (${d.grade})\n**Target:** ${d.target}\n**Language:** ${d.language || 'N/A'}\n\n## Summary\n${d.summary}\n\n## Findings (${(d.findings||[]).length})\n\n`;
-        (d.findings || []).forEach((f, i) => {
+        let md = `# SafeShip Security Report\n\n**Score:** ${d.score}/100 (${d.grade})\n**Target:** ${d.target}\n**Language:** ${d.language||'N/A'}\n\n## Summary\n${d.summary}\n\n## Findings (${(d.findings||[]).length})\n\n`;
+        (d.findings||[]).forEach((f,i) => {
             md += `### ${i+1}. ${f.title} [${(f.severity||'').toUpperCase()}]\n`;
             if (f.cwe) md += `**CWE:** ${f.cwe}  \n`;
             md += `**Location:** ${f.location}  \n**Category:** ${f.category}  \n\n${f.description}\n\n`;
@@ -810,8 +734,7 @@ ${schema}`;
         document.getElementById('idleState').style.display = 'flex';
         document.getElementById('loadingState').style.display = 'none';
         document.getElementById('contentState').style.display = 'none';
-        activeFilter = 'all';
-        lastResult = null;
+        activeFilter = 'all'; lastResult = null;
     }
 
     /* ─── HISTORY ───────────────────────────────────────────────────── */
@@ -824,10 +747,10 @@ ${schema}`;
             return `<div class="history-item">
                 <div onclick='renderResults(${JSON.stringify(i).replace(/'/g,"&apos;")})'>
                     <div style="display:flex;justify-content:space-between;align-items:center">
-                        <span class="history-score" style="color:${color}">${i.score || 0}/100</span>
+                        <span class="history-score" style="color:${color}">${i.score||0}/100</span>
                         <span class="history-date">${i.timestamp ? new Date(i.timestamp.seconds*1000).toLocaleDateString() : '—'}</span>
                     </div>
-                    <div class="history-target">${i.target || 'Unknown'}</div>
+                    <div class="history-target">${i.target||'Unknown'}</div>
                 </div>
                 <button class="history-delete" onclick="deleteAudit('${i.id}')" data-tip="Delete">
                     <i data-lucide="trash-2" style="width:12px;height:12px"></i>
@@ -843,38 +766,40 @@ ${schema}`;
     import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
     import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    window.neuralTelemetry = (c, m, d=null) => console.log(`%c[NEURAL][${c}]%c ${m}`, 'color:#00ff88;font-weight:bold', 'color:#5a6060', d||'');
+    window.neuralTelemetry = (c, m, d=null) =>
+        console.log(`%c[NEURAL][${c}]%c ${m}`, 'color:#00ff88;font-weight:bold', 'color:#5a6060', d||'');
 
-    const isInjected = val => typeof val === 'string' && val && !val.startsWith('__') && !val.endsWith('__');
-    const getGeminiKey = () => isInjected(window.INJECTED_GEMINI_KEY) ? window.INJECTED_GEMINI_KEY : null;
-    const getGroqKey   = () => isInjected(window.INJECTED_GROQ_KEY)   ? window.INJECTED_GROQ_KEY   : null;
-    const getFirebaseConfig = () => {
-        const r = window.INJECTED_FIREBASE;
-        return (r && typeof r === 'object' && r.apiKey) ? r : null;
-    };
-
+    /* ── Init context — no keys stored here ── */
     const appId = 'safeship-trace-v7';
-    window.SAFESHIP_CONTEXT = {
-        db: null, auth: null, appId, user: null, history: [], currentFiles: [],
-        sessionKeys: { gemini: getGeminiKey(), groq: getGroqKey() }
-    };
+    window.SAFESHIP_CONTEXT = { db: null, auth: null, appId, user: null, history: [], currentFiles: [] };
 
-    /* ── Status UI ── */
+    /* ── Status helpers ── */
     function setStatus(label, state) {
         document.getElementById('statusLabel').textContent = label;
         const dot = document.getElementById('statusDot');
-        dot.className = 'status-dot' + (state === 'active' ? ' active' : state === 'warn' ? ' warn' : state === 'error' ? ' error' : '');
+        dot.className = 'status-dot' + (state==='active' ? ' active' : state==='warn' ? ' warn' : state==='error' ? ' error' : '');
+    }
+
+    /* ── Validate Worker URL ── */
+    const workerUrl = (window.WORKER_URL || '').replace(/\/$/, '');
+    if (!workerUrl || workerUrl === 'https://safeship.avirajsalunkhe1.workers.dev') {
+        neuralTelemetry('Engine', 'CRITICAL: WORKER_URL not injected — check GitHub Secrets');
+        setStatus('No Server', 'error');
+    } else {
+        neuralTelemetry('Engine', 'Neural proxy → ' + workerUrl);
     }
 
     /* ── Firebase init ── */
-    const config = getFirebaseConfig();
+    const config = (window.INJECTED_FIREBASE && typeof window.INJECTED_FIREBASE === 'object' && window.INJECTED_FIREBASE.apiKey)
+        ? window.INJECTED_FIREBASE : null;
+
     if (config) {
         try {
             const app = initializeApp(config);
             const auth = getAuth(app);
-            const db = getFirestore(app);
+            const db   = getFirestore(app);
             window.SAFESHIP_CONTEXT.auth = auth;
-            window.SAFESHIP_CONTEXT.db = db;
+            window.SAFESHIP_CONTEXT.db   = db;
             onAuthStateChanged(auth, user => {
                 window.SAFESHIP_CONTEXT.user = user;
                 const el = document.getElementById('userIdText');
@@ -889,26 +814,25 @@ ${schema}`;
             setStatus('DB Offline', 'error');
         }
     } else {
-        neuralTelemetry('Firebase', 'Standalone mode');
-        setStatus('Standalone', '');
+        neuralTelemetry('Firebase', 'Standalone mode — no history persistence');
+        document.getElementById('userIdText').textContent = 'Standalone';
+        if (workerUrl && workerUrl !== 'https://safeship.avirajsalunkhe1.workers.dev') setStatus('Neural Active', 'active');
     }
 
-    /* ── Key status ── */
-    const { gemini, groq } = window.SAFESHIP_CONTEXT.sessionKeys;
-    if (gemini) { neuralTelemetry('Engine', 'Gemini node online'); if (!config) setStatus('Neural Active', 'active'); }
-    else if (groq) { neuralTelemetry('Engine', 'Groq fallback online'); if (!config) setStatus('Groq Fallback', 'warn'); }
-    else { neuralTelemetry('Engine', 'CRITICAL: No AI keys'); setStatus('No Keys', 'error'); }
-
-    /* ── Firestore ── */
+    /* ── Firestore history ── */
     function loadHistory(userId) {
         const { db, appId } = window.SAFESHIP_CONTEXT;
         if (!db) return;
-        onSnapshot(collection(db, 'artifacts', appId, 'users', userId, 'audits'), snap => {
-            window.SAFESHIP_CONTEXT.history = snap.docs
-                .map(d => ({ id: d.id, ...d.data() }))
-                .sort((a, b) => (b.timestamp?.seconds||0) - (a.timestamp?.seconds||0));
-            renderHistory();
-        }, err => neuralTelemetry('History', 'Access error', err));
+        onSnapshot(
+            collection(db, 'artifacts', appId, 'users', userId, 'audits'),
+            snap => {
+                window.SAFESHIP_CONTEXT.history = snap.docs
+                    .map(d => ({ id: d.id, ...d.data() }))
+                    .sort((a, b) => (b.timestamp?.seconds||0) - (a.timestamp?.seconds||0));
+                renderHistory();
+            },
+            err => neuralTelemetry('History', 'Access error', err)
+        );
     }
 
     window.saveAuditToCloud = async data => {
@@ -925,25 +849,24 @@ ${schema}`;
         catch(e) { neuralTelemetry('Storage', 'Delete error', e); }
     };
 
-   window.callNeuralNode = async prompt => {
-    const base = (window.WORKER_URL || '').replace(/\/$/, '');
-    if (!base || base === 'https://safeship.avirajsalunkhe1.workers.dev') throw new Error('Server proxy not configured.');
+    /* ── callNeuralNode — single call to /audit, server handles Gemini→Groq fallback ── */
+    window.callNeuralNode = async prompt => {
+        const base = (window.WORKER_URL || '').replace(/\/$/, '');
+        if (!base || base === 'https://safeship.avirajsalunkhe1.workers.dev') throw new Error('Server proxy not configured.');
 
-    // Single call to /audit — server handles Gemini→Groq fallback automatically
-    const res = await fetch(`${base}/audit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
-    });
+        const res = await fetch(`${base}/audit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt })
+        });
 
-    const d = await res.json();
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || `Server error ${res.status}`);
 
-    if (!res.ok) {
-        throw new Error(d.error || `Server error ${res.status}`);
-    }
-    neuralTelemetry('Engine', `Response via ${d.engine}`);
-    return d.result;
-};
+        neuralTelemetry('Engine', `Response via ${d.engine}`);
+        return d.result;
+    };
+
     lucide.createIcons();
 </script>
 </body>
