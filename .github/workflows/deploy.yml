@@ -1,52 +1,98 @@
-name: Deploy to GitHub Pages
+name: Neural Deployment Pipeline
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # ── Deploy server.js to Cloudflare Worker ──────────────────────────
+      # This runs FIRST so the Worker URL is always up before the site deploys.
+      - name: Deploy server.js to Cloudflare Worker
+        uses: cloudflare/wrangler-action@v3
         with:
-          node-version: '18'
-      
-      - run: npm ci
-      
-      - name: Build static site
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          wranglerVersion: '3'
+          command: deploy server.js --name safeship-server --compatibility-date 2024-01-01
+
+      # ── Inject WORKER_URL + Firebase into index.html ───────────────────
+      # API keys are NEVER touched here. They live only in Cloudflare Worker env vars.
+      - name: Inject Config into index.html
+        shell: python
+        env:
+          FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
         run: |
-          mkdir -p dist
-          cp index.html dist/
-          cp -r node_modules dist/
-      
+            import os, sys, json, re
+
+            filename = 'index.html'
+            if not os.path.exists(filename):
+                print(f"[!] CRITICAL: {filename} not found.")
+                sys.exit(1)
+
+            with open(filename, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            firebase_raw = os.environ.get('FIREBASE_CONFIG', '').strip()
+            worker_url   = os.environ.get('WORKER_URL', '').strip()
+
+            # ── Worker URL ───────────────────────────────────────────────
+            if not worker_url:
+                print("[!] CRITICAL: WORKER_URL secret is empty.")
+                print("[!] Add WORKER_URL to GitHub Secrets (your Cloudflare Worker URL).")
+                sys.exit(1)
+            if '__WORKER_URL__' in content:
+                content = content.replace('__WORKER_URL__', worker_url)
+                print(f"[*] WORKER_URL injected OK")
+            else:
+                print("[!] WARNING: __WORKER_URL__ placeholder missing in index.html")
+
+            # ── Firebase config (optional) ───────────────────────────────
+            firebase_object = 'null'
+            if firebase_raw and firebase_raw != '{}':
+                try:
+                    normalized = firebase_raw
+                    normalized = normalized.replace('\u201c', '"').replace('\u201d', '"')
+                    normalized = normalized.replace('\u2018', "'").replace('\u2019', "'")
+                    normalized = re.sub(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)', r'\1"\2"\3', normalized)
+                    normalized = re.sub(r"'([^']*)'", r'"\1"', normalized)
+                    normalized = re.sub(r',\s*}', '}', normalized)
+                    parsed = json.loads(normalized)
+                    firebase_object = json.dumps(parsed)
+                    print(f"[*] Firebase OK — projectId: {parsed.get('projectId', 'unknown')}")
+                except Exception as e:
+                    print(f"[!] Firebase parse FAILED: {e} — standalone mode.")
+            else:
+                print("[!] FIREBASE_CONFIG empty — standalone mode.")
+
+            if '__FIREBASE_CONFIG_JSON__' in content:
+                content = content.replace('__FIREBASE_CONFIG_JSON__', firebase_object)
+                print(f"[*] Firebase injected: {'OK' if firebase_object != 'null' else 'null (standalone)'}")
+            else:
+                print("[!] WARNING: __FIREBASE_CONFIG_JSON__ placeholder missing in index.html")
+
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+            print("[*] Handshake Complete. Keys secured in Cloudflare Worker.")
+
+      # ── Deploy to GitHub Pages ─────────────────────────────────────────
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
-          cname: yourdomain.com  # Optional: your custom domain
-
-  backend-deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      
-      - run: npm ci
-      
-      - name: Deploy Backend (Heroku example)
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: |
-          npm install -g heroku
-          heroku login
-          heroku create safeship-backend --region us
-          heroku config:set GEMINI_API_KEY=$GEMINI_API_KEY
-          heroku config:set GROQ_API_KEY=$GROQ_API_KEY
-          git push heroku main
+          publish_dir: ./
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: "Neural v6.2.4: Secure Worker Proxy [skip ci]"
