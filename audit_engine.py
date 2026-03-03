@@ -1,5 +1,5 @@
 # File: audit_engine.py
-# Description: Python CLI version of SafeShip Trace Engine v6.2.4
+# Description: Python CLI version of SafeShip Trace Engine v6.2.5
 
 import requests
 import json
@@ -10,7 +10,8 @@ class SafeShipEngine:
     def __init__(self):
         # Neural Handshake: Load from env
         self.gemini_key = os.getenv('GEMINI_API_KEY')
-        self.model = "gemini-2.5-flash-preview-09-2025"
+        # Use stable 1.5 Flash instead of preview to avoid 404
+        self.model = "gemini-1.5-flash"
 
         if not self.gemini_key:
             print("[!] CRITICAL: GEMINI_API_KEY environment variable is missing.")
