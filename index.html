@@ -9,11 +9,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <script>
-        var INJECTED_GEMINI_KEY = "__GEMINI_API_KEY__";
-        var INJECTED_GROQ_KEY   = "__GROQ_API_KEY__";
-        var INJECTED_FIREBASE   = __FIREBASE_CONFIG_JSON__;
-    </script>
+   <script>
+    var WORKER_URL        = "https://safeship.avirajsalunkhe1.workers.dev";
+    var INJECTED_FIREBASE = {"apiKey": "AIzaSyB_d7N2FTeD0mrO-odMx2ajwtVIHOOKig0", "authDomain": "safeship-trace.firebaseapp.com", "projectId": "safeship-trace", "storageBucket": "safeship-trace.firebasestorage.app", "messagingSenderId": "538497558292", "appId": "1:538497558292:web:0e512311b343b5ec1f0401", "measurementId": "G-Z097L20KCF"};
+</script>
 
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -926,38 +925,44 @@ ${schema}`;
         catch(e) { neuralTelemetry('Storage', 'Delete error', e); }
     };
 
-    /* ── AI API calls ── */
-    window.callNeuralNode = async prompt => {
-        const { gemini, groq } = window.SAFESHIP_CONTEXT.sessionKeys;
-        if (gemini) {
-            try { return await callGemini(gemini, prompt); }
-            catch(e) { if (groq) return await callGroq(groq, prompt); throw e; }
-        }
-        if (groq) return await callGroq(groq, prompt);
-        throw new Error('No API keys configured.');
-    };
+   window.callNeuralNode = async prompt => {
+    const base = (window.WORKER_URL || '').replace(/\/$/, '');
+    if (!base || base === 'https://safeship.avirajsalunkhe1.workers.dev') throw new Error('Server proxy not configured.');
 
-    async function callGemini(key, prompt) {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
+    // Try Gemini first via server.js proxy
+    try {
+        const res = await fetch(`${base}/gemini`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } })
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { responseMimeType: 'application/json' }
+            })
         });
-        if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
+        if (!res.ok) throw new Error(`Gemini ${res.status}`);
         const d = await res.json();
+        if (d.error) throw new Error(d.error);
         return JSON.parse(d.candidates[0].content.parts[0].text);
+    } catch (e) {
+        neuralTelemetry('Engine', 'Gemini failed, switching to Groq: ' + e.message);
     }
 
-    async function callGroq(key, prompt) {
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } })
-        });
-        if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`);
-        const d = await res.json();
-        return JSON.parse(d.choices[0].message.content);
+    // Fallback: Groq via server.js proxy
+    const res = await fetch(`${base}/groq`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            messages: [{ role: 'user', content: prompt }],
+            response_format: { type: 'json_object' }
+        })
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(`Groq ${res.status}: ${err?.error?.message || 'failed'}`);
     }
-
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    return JSON.parse(d.choices[0].message.content);
+};
     lucide.createIcons();
 </script>
 </body>
