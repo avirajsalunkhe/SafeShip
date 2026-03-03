@@ -557,7 +557,7 @@
     // ✅ FIXED: removed old sessionKeys check — Worker handles all keys now
     async function startAudit(mode) {
         const workerUrl = window.WORKER_URL;
-        if (!workerUrl || workerUrl === 'https://safeship.avirajsalunkhe1.workers.dev') {
+        if (!workerUrl || workerUrl === '__WORKER_URL__') {
             alert('Server not configured. Check WORKER_URL in GitHub Secrets and redeploy.');
             return;
         }
@@ -782,7 +782,7 @@
 
     /* ── Validate Worker URL ── */
     const workerUrl = (window.WORKER_URL || '').replace(/\/$/, '');
-    if (!workerUrl || workerUrl === 'https://safeship.avirajsalunkhe1.workers.dev') {
+    if (!workerUrl || workerUrl === '__WORKER_URL__') {
         neuralTelemetry('Engine', 'CRITICAL: WORKER_URL not injected — check GitHub Secrets');
         setStatus('No Server', 'error');
     } else {
@@ -816,7 +816,7 @@
     } else {
         neuralTelemetry('Firebase', 'Standalone mode — no history persistence');
         document.getElementById('userIdText').textContent = 'Standalone';
-        if (workerUrl && workerUrl !== 'https://safeship.avirajsalunkhe1.workers.dev') setStatus('Neural Active', 'active');
+        if (workerUrl && workerUrl !== '__WORKER_URL__') setStatus('Neural Active', 'active');
     }
 
     /* ── Firestore history ── */
@@ -852,7 +852,7 @@
     /* ── callNeuralNode — single call to /audit, server handles Gemini→Groq fallback ── */
     window.callNeuralNode = async prompt => {
         const base = (window.WORKER_URL || '').replace(/\/$/, '');
-        if (!base || base === 'https://safeship.avirajsalunkhe1.workers.dev') throw new Error('Server proxy not configured.');
+        if (!base || base === '__WORKER_URL__') throw new Error('Server proxy not configured.');
 
         const res = await fetch(`${base}/audit`, {
             method: 'POST',
