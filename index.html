@@ -10,9 +10,23 @@
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <script>
-        var INJECTED_GEMINI_KEY = "__GEMINI_API_KEY__";
-        var INJECTED_GROQ_KEY   = "__GROQ_API_KEY__";
-        var INJECTED_FIREBASE   = __FIREBASE_CONFIG_JSON__;
+        /**
+         * SECRETS HANDSHAKE
+         * These are replaced during the CI/CD build process using deploy.yml placeholders.
+         */
+        var SS_KEY_G = "[[ST_GEMINI_NODE]]";
+        var SS_KEY_Q = "[[ST_GROQ_NODE]]";
+        var SS_FB_RAW = "[[ST_FIREBASE_JSON]]";
+        var SS_FB_CONF = null;
+        
+        try {
+            // Check if injection occurred (placeholders no longer present)
+            if (SS_FB_RAW && !SS_FB_RAW.includes("[[") && !SS_FB_RAW.includes("]]")) {
+                SS_FB_CONF = typeof SS_FB_RAW === 'string' ? JSON.parse(SS_FB_RAW) : SS_FB_RAW;
+            }
+        } catch (e) {
+            console.warn("Handshake: Firebase Config unavailable or malformed.");
+        }
     </script>
 
     <style>
@@ -37,928 +51,371 @@
         ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
         .mono { font-family: var(--font-mono); }
 
-        /* Layout */
         #app { display: flex; height: 100vh; }
         #sidebar { width: 260px; min-width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
         #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         #topbar { height: 56px; min-height: 56px; background: rgba(8,9,9,0.9); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; backdrop-filter: blur(12px); }
         #content { flex: 1; overflow-y: auto; padding: 32px; }
 
-        /* Sidebar */
-        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
         .logo { display: flex; align-items: center; gap: 10px; }
         .logo-icon { width: 32px; height: 32px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .logo-icon svg { color: #000; width: 18px; height: 18px; }
         .logo-text { font-size: 15px; font-weight: 800; letter-spacing: -0.5px; }
 
-        .sidebar-nav { padding: 8px; border-bottom: 1px solid var(--border); }
         .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; color: var(--muted); transition: all 0.15s; border: 1px solid transparent; }
         .nav-item:hover { background: var(--accent-dim); color: var(--text); }
         .nav-item.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-border); }
-        .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
-        .nav-badge { margin-left: auto; font-family: var(--font-mono); font-size: 9px; padding: 2px 6px; border-radius: 4px; background: var(--border); color: var(--muted); }
-        .nav-badge.new { background: rgba(0,255,136,0.15); color: var(--accent); }
 
         .sidebar-section-title { font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px; color: var(--muted); padding: 16px 20px 8px; text-transform: uppercase; }
         .history-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         .history-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: all 0.15s; position: relative; margin-bottom: 4px; }
         .history-item:hover { background: var(--accent-dim); border-color: var(--accent-border); }
-        .history-score { font-family: var(--font-mono); font-size: 11px; font-weight: 700; }
-        .history-target { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-        .history-date { font-family: var(--font-mono); font-size: 9px; color: var(--muted); }
-        .history-delete { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); opacity: 0; transition: opacity 0.15s; color: var(--danger); cursor: pointer; }
-        .history-item:hover .history-delete { opacity: 1; }
-
-        .sidebar-footer { padding: 12px; border-top: 1px solid var(--border); }
-        .credit-footer { margin-top: 2px; }
-        .credit-divider { height: 1px; background: linear-gradient(to right, transparent, var(--accent-border), transparent); margin-bottom: 10px; }
-        .credit-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
-        .credit-copy { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; }
-        .credit-github { color: var(--muted); display: flex; align-items: center; transition: color 0.2s, transform 0.2s; }
-        .credit-github:hover { color: var(--accent); transform: scale(1.15); }
-        .credit-by { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 0.5px; line-height: 1.7; }
-        .credit-name { color: var(--accent); text-decoration: none; font-weight: 700; letter-spacing: 0.5px; transition: opacity 0.2s; display: inline-flex; align-items: center; gap: 2px; }
-        .credit-name:hover { opacity: 0.75; text-decoration: underline; text-underline-offset: 3px; }
-        .node-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; }
-        .node-avatar { width: 28px; height: 28px; background: var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .node-id { font-family: var(--font-mono); font-size: 9px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 140px; }
-
-        /* Topbar */
-        .tabs { display: flex; gap: 4px; }
-        .tab-btn { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 6px 14px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; background: transparent; color: var(--muted); transition: all 0.15s; text-transform: uppercase; }
-        .tab-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-border); }
-        .tab-btn:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.04); }
 
         .status-pill { display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface); }
         .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-bright); }
         .status-dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse-dot 2s infinite; }
-        .status-dot.warn { background: var(--warn); }
         .status-dot.error { background: var(--danger); }
         @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        .status-label { font-family: var(--font-mono); font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
 
-        /* Cards & Forms */
         .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; }
         .section-title { font-size: 28px; font-weight: 800; letter-spacing: -1px; line-height: 1.1; margin-bottom: 20px; }
         .section-title span { color: var(--accent); }
 
-        .input-row { display: flex; gap: 10px; }
-        .text-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-family: var(--font-mono); font-size: 13px; color: var(--text); outline: none; transition: border-color 0.15s; }
-        .text-input:focus { border-color: var(--accent-border); }
-        .text-input::placeholder { color: var(--muted); }
-
-        .btn-primary { background: var(--accent); color: #000; font-family: var(--font-display); font-weight: 800; font-size: 12px; letter-spacing: 1px; padding: 12px 24px; border-radius: 10px; border: none; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
-        .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
-        .btn-primary:active { transform: translateY(0); }
-        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-        .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); font-family: var(--font-display); font-weight: 700; font-size: 11px; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
-        .btn-ghost:hover { color: var(--text); border-color: var(--border-bright); }
-
-        /* Language selector */
-        .lang-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
-        .lang-chip { font-family: var(--font-mono); font-size: 10px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted); cursor: pointer; transition: all 0.15s; background: transparent; }
-        .lang-chip:hover { border-color: var(--accent-border); color: var(--text); }
-        .lang-chip.active { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
-
-        /* Check categories */
+        .text-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-family: var(--font-mono); font-size: 13px; color: var(--text); outline: none; }
+        .btn-primary { background: var(--accent); color: #000; font-weight: 800; font-size: 12px; letter-spacing: 1px; padding: 12px 24px; border-radius: 10px; cursor: pointer; }
+        
         .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-bottom: 20px; }
         .check-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; font-size: 11px; font-weight: 700; color: var(--muted); background: transparent; user-select: none; }
-        .check-chip:hover { border-color: var(--accent-border); color: var(--text); }
         .check-chip.active { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
-        .check-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-bright); flex-shrink: 0; transition: background 0.15s; }
+        .check-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-bright); }
         .check-chip.active .dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
 
-        /* Drop zone */
-        .dropzone { border: 2px dashed var(--border); border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; position: relative; }
-        .dropzone:hover, .dropzone.drag-over { border-color: var(--accent-border); background: var(--accent-dim); }
-        .dropzone-icon { color: var(--muted); margin: 0 auto 12px; display: block; }
-        .dropzone-text { font-size: 13px; font-weight: 700; color: var(--muted); }
-        .dropzone-sub { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-top: 4px; opacity: 0.7; }
-        .file-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-        .file-chip { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+        .lang-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+        .lang-chip { font-family: var(--font-mono); font-size: 10px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted); cursor: pointer; transition: all 0.15s; }
+        .lang-chip.active { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
 
-        /* Code input textarea */
-        .code-textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text); outline: none; resize: vertical; min-height: 160px; transition: border-color 0.15s; line-height: 1.6; }
-        .code-textarea:focus { border-color: var(--accent-border); }
-        .code-textarea::placeholder { color: var(--muted); }
+        .dropzone { border: 2px dashed var(--border); border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .dropzone:hover { border-color: var(--accent-border); background: var(--accent-dim); }
 
-        /* Loading */
+        .code-textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text); outline: none; resize: vertical; min-height: 160px; }
+
         #loadingState { display: none; flex-direction: column; align-items: center; justify-content: center; height: 320px; gap: 20px; }
         .spinner { width: 40px; height: 40px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .loading-phase { font-family: var(--font-mono); font-size: 11px; color: var(--accent); letter-spacing: 2px; animation: blink 1.5s ease-in-out infinite; }
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        .loading-steps { display: flex; flex-direction: column; gap: 6px; width: 280px; }
-        .loading-step { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
-        .loading-step.done { color: var(--accent); }
-        .loading-step.active { color: var(--text); }
-        .step-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
-        .loading-step.done .step-dot { background: var(--accent); }
-        .loading-step.active .step-dot { background: var(--text); animation: pulse-dot 1s infinite; }
 
-        /* Results */
+        /* Score Ring UI */
         .score-ring-wrap { position: relative; width: 100px; height: 100px; flex-shrink: 0; }
-        .score-ring-wrap svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+        .score-ring-wrap svg { transform: rotate(-90deg); }
         .score-number { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-        .score-num { font-size: 26px; font-weight: 800; letter-spacing: -2px; line-height: 1; }
-        .score-pct { font-family: var(--font-mono); font-size: 9px; color: var(--muted); }
-        .score-header { display: flex; align-items: center; gap: 24px; margin-bottom: 20px; }
-        .score-meta { flex: 1; }
-        .score-label { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
-        .score-grade { font-size: 22px; font-weight: 800; }
-        .score-summary { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 4px; }
+        .score-num { font-size: 26px; font-weight: 800; letter-spacing: -2px; }
 
-        .findings-header { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-        .findings-header span { background: var(--border); border-radius: 4px; padding: 2px 8px; color: var(--text); }
-
-        .finding-card { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 10px; transition: border-color 0.15s; }
-        .finding-card:hover { border-color: var(--border-bright); }
-        .finding-card.severity-critical { border-left: 3px solid var(--danger); }
-        .finding-card.severity-high { border-left: 3px solid #ff7b3b; }
-        .finding-card.severity-medium { border-left: 3px solid var(--warn); }
-        .finding-card.severity-low { border-left: 3px solid var(--info); }
-        .finding-card.severity-info { border-left: 3px solid var(--muted); }
-        .finding-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 14px 16px 0; gap: 12px; cursor: pointer; }
-        .finding-title { font-size: 13px; font-weight: 700; }
-        .finding-body { padding: 0 16px 14px; margin-top: 10px; }
-        .finding-location { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-bottom: 8px; }
-        .finding-desc { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 12px; }
-        .finding-fix { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
-        .fix-label { font-family: var(--font-mono); font-size: 9px; color: var(--accent); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px; }
-        .fix-code { font-family: var(--font-mono); font-size: 11px; color: #a8d8b0; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
-
-        .severity-badge { font-family: var(--font-mono); font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 4px; white-space: nowrap; letter-spacing: 1px; flex-shrink: 0; }
+        .finding-card { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 10px; }
+        .finding-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; cursor: pointer; }
+        .severity-badge { font-family: var(--font-mono); font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 4px; }
         .badge-critical { background: rgba(255,59,59,0.15); color: var(--danger); }
         .badge-high { background: rgba(255,123,59,0.15); color: #ff7b3b; }
-        .badge-medium { background: rgba(255,184,0,0.15); color: var(--warn); }
-        .badge-low { background: rgba(59,158,255,0.15); color: var(--info); }
-        .badge-info { background: rgba(90,96,96,0.2); color: var(--muted); }
 
-        .stats-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-        .stat-box { flex: 1; min-width: 80px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
-        .stat-num { font-size: 22px; font-weight: 800; letter-spacing: -1px; }
-        .stat-lbl { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; margin-top: 2px; }
+        .stat-box { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
+        .stat-num { font-size: 22px; font-weight: 800; }
+        .stat-lbl { font-family: var(--font-mono); font-size: 9px; color: var(--muted); text-transform: uppercase; margin-top: 2px; }
 
-        /* Filter bar */
-        .filter-bar { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
-        .filter-btn { font-family: var(--font-mono); font-size: 9px; font-weight: 700; padding: 4px 10px; border-radius: 5px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; transition: all 0.15s; letter-spacing: 1px; text-transform: uppercase; }
-        .filter-btn.active { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
-        .filter-count { font-family: var(--font-mono); font-size: 9px; color: var(--muted); margin-left: auto; }
-
-        /* Export bar */
-        .export-bar { display: flex; gap: 8px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
-
-        /* Idle */
-        #idleState { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 280px; border: 1px dashed var(--border); border-radius: 16px; color: var(--muted); }
-        .idle-icon { color: var(--border-bright); margin-bottom: 12px; }
-
-        /* Tooltip */
-        [data-tip] { position: relative; }
-        [data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #1a1d1d; border: 1px solid var(--border); color: var(--text); font-family: var(--font-mono); font-size: 10px; padding: 5px 10px; border-radius: 6px; white-space: nowrap; z-index: 100; pointer-events: none; }
-
-        /* Animations */
-        .fade-in { animation: fadeIn 0.3s ease; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-
-        /* Collapsed finding body */
-        .finding-body { display: none; }
-        .finding-card.expanded .finding-body { display: block; }
-        .finding-toggle { color: var(--muted); transition: transform 0.2s; flex-shrink: 0; margin-top: 2px; }
-        .finding-card.expanded .finding-toggle { transform: rotate(180deg); }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            #sidebar { display: none; }
-            #content { padding: 16px; }
-        }
+        .tab-btn { font-family: var(--font-mono); font-size: 10px; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer; transition: all 0.15s; color: var(--muted); }
+        .tab-btn.active { background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent-border); }
     </style>
 </head>
 <body>
 
 <div id="app">
-    <!-- ── SIDEBAR ─────────────────────────────────────────────── -->
     <aside id="sidebar">
-        <div class="sidebar-header">
+        <div class="p-5 border-b border-border">
             <div class="logo">
                 <div class="logo-icon"><i data-lucide="shield-check"></i></div>
-                <div>
-                    <div class="logo-text">SafeShip</div>
-                </div>
+                <div class="logo-text">SafeShip</div>
             </div>
         </div>
 
-        <div class="sidebar-nav">
-            <div class="nav-item active" onclick="switchTab('url')" id="nav-url">
-                <i data-lucide="globe" style="width:15px;height:15px"></i> URL Probe
-            </div>
-            <div class="nav-item" onclick="switchTab('code')" id="nav-code">
-                <i data-lucide="file-code" style="width:15px;height:15px"></i> SAST Audit
-                <span class="nav-badge new">Multi-lang</span>
-            </div>
-            <div class="nav-item" onclick="switchTab('paste')" id="nav-paste">
-                <i data-lucide="clipboard" style="width:15px;height:15px"></i> Paste Code
-            </div>
+        <div class="p-2 space-y-1">
+            <div class="nav-item active" onclick="switchTab('url')" id="nav-url"><i data-lucide="globe" style="width:15px"></i> URL Probe</div>
+            <div class="nav-item" onclick="switchTab('code')" id="nav-code"><i data-lucide="file-code" style="width:15px"></i> SAST Audit</div>
+            <div class="nav-item" onclick="switchTab('paste')" id="nav-paste"><i data-lucide="clipboard" style="width:15px"></i> Paste Code</div>
         </div>
 
         <div class="sidebar-section-title">Trace History</div>
-        <div class="history-list" id="historyContainer">
-            <div style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:10px;color:var(--muted)">NO TRACES YET</div>
-        </div>
+        <div class="history-list" id="historyContainer"></div>
 
-        <div class="sidebar-footer">
-            <div class="node-card" style="margin-bottom:10px">
-                <div class="node-avatar"><i data-lucide="user" style="width:14px;height:14px;color:var(--muted)"></i></div>
-                <div>
-                    <div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase">Node ID</div>
-                    <div class="node-id" id="userIdText">Connecting...</div>
-                </div>
-            </div>
-            <div class="credit-footer">
-                <div class="credit-divider"></div>
-                <div class="credit-row">
-                    <span class="credit-copy">&copy; 2025 SafeShip</span>
-                    <a href="https://github.com/avirajsalunkhe" target="_blank" rel="noopener" class="credit-github">
-                        <i data-lucide="github" style="width:13px;height:13px"></i>
-                    </a>
-                </div>
-                <div class="credit-by">
-                    Designed &amp; Developed by<br>
-                    <a href="https://github.com/avirajsalunkhe" target="_blank" rel="noopener" class="credit-name">
-                        Aviraj Salunkhe <i data-lucide="arrow-up-right" style="width:10px;height:10px;vertical-align:middle"></i>
-                    </a>
-                </div>
+        <div class="p-3 mt-auto border-t border-border">
+            <div class="bg-black border border-border rounded-lg p-3 flex items-center gap-3">
+                <div class="w-7 h-7 bg-border rounded-full flex items-center justify-center"><i data-lucide="user" style="width:14px;color:var(--muted)"></i></div>
+                <div class="node-id text-[9px] mono text-accent" id="userIdText">Handshake...</div>
             </div>
         </div>
     </aside>
 
-    <!-- ── MAIN ───────────────────────────────────────────────── -->
     <div id="main">
         <div id="topbar">
-            <div class="tabs">
+            <div class="flex gap-2">
                 <button class="tab-btn active" onclick="switchTab('url')" id="tab-url">URL Probe</button>
                 <button class="tab-btn" onclick="switchTab('code')" id="tab-code">SAST Audit</button>
                 <button class="tab-btn" onclick="switchTab('paste')" id="tab-paste">Paste Code</button>
             </div>
-            <div style="display:flex;align-items:center;gap:10px">
-                <div class="status-pill">
-                    <div class="status-dot" id="statusDot"></div>
-                    <span class="status-label" id="statusLabel">Standby</span>
-                </div>
+            <div class="status-pill">
+                <div class="status-dot" id="statusDot"></div>
+                <span class="status-label" id="statusLabel">Standby</span>
             </div>
         </div>
 
         <div id="content">
-
-            <!-- URL PROBE TAB -->
+            <!-- URL TAB -->
             <div id="tab-panel-url" class="tab-panel">
                 <div class="section-title">Deep <span>Live</span> Probe.</div>
-                <div class="card" style="margin-bottom:16px">
-                    <div class="input-row" style="margin-bottom:16px">
-                        <input type="text" class="text-input" id="urlInput" placeholder="https://target-endpoint.com/api/v1">
+                <div class="card">
+                    <div class="flex gap-2 mb-4">
+                        <input type="text" class="text-input" id="urlInput" placeholder="https://api.target.com/v1">
                         <button class="btn-primary" onclick="startAudit('url')">INITIATE</button>
                     </div>
-                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:12px;letter-spacing:1px">SECURITY CHECKS</div>
                     <div class="check-grid" id="urlChecks">
-                        <div class="check-chip active" data-check="xss"><span class="dot"></span>XSS Detection</div>
-                        <div class="check-chip active" data-check="sqli"><span class="dot"></span>SQL Injection</div>
-                        <div class="check-chip active" data-check="headers"><span class="dot"></span>HTTP Headers</div>
-                        <div class="check-chip active" data-check="csrf"><span class="dot"></span>CSRF Risks</div>
-                        <div class="check-chip active" data-check="ssl"><span class="dot"></span>SSL/TLS Config</div>
-                        <div class="check-chip active" data-check="cors"><span class="dot"></span>CORS Policy</div>
-                        <div class="check-chip active" data-check="auth"><span class="dot"></span>Auth Weaknesses</div>
-                        <div class="check-chip active" data-check="ratelimit"><span class="dot"></span>Rate Limiting</div>
-                        <div class="check-chip active" data-check="exposure"><span class="dot"></span>Data Exposure</div>
-                        <div class="check-chip active" data-check="dirtraversal"><span class="dot"></span>Path Traversal</div>
-                        <div class="check-chip active" data-check="ssrf"><span class="dot"></span>SSRF Vectors</div>
-                        <div class="check-chip active" data-check="idor"><span class="dot"></span>IDOR / BOLA</div>
+                        <div class="check-chip active" onclick="this.classList.toggle('active')"><span class="dot"></span>XSS Detection</div>
+                        <div class="check-chip active" onclick="this.classList.toggle('active')"><span class="dot"></span>SQL Injection</div>
+                        <div class="check-chip active" onclick="this.classList.toggle('active')"><span class="dot"></span>HTTP Headers</div>
+                        <div class="check-chip active" onclick="this.classList.toggle('active')"><span class="dot"></span>CSRF Risks</div>
                     </div>
                 </div>
             </div>
 
-            <!-- SAST FILE AUDIT TAB -->
+            <!-- CODE TAB -->
             <div id="tab-panel-code" class="tab-panel" style="display:none">
                 <div class="section-title">Neural <span>SAST</span>.</div>
-                <div class="card" style="margin-bottom:16px">
-                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:10px;letter-spacing:1px">TARGET LANGUAGE</div>
-                    <div class="lang-grid" id="langGrid">
-                        <div class="lang-chip active" data-lang="auto">Auto Detect</div>
-                        <div class="lang-chip" data-lang="javascript">JavaScript</div>
-                        <div class="lang-chip" data-lang="typescript">TypeScript</div>
-                        <div class="lang-chip" data-lang="python">Python</div>
-                        <div class="lang-chip" data-lang="php">PHP</div>
-                        <div class="lang-chip" data-lang="java">Java</div>
-                        <div class="lang-chip" data-lang="csharp">C#</div>
-                        <div class="lang-chip" data-lang="go">Go</div>
-                        <div class="lang-chip" data-lang="ruby">Ruby</div>
-                        <div class="lang-chip" data-lang="rust">Rust</div>
-                        <div class="lang-chip" data-lang="kotlin">Kotlin</div>
-                        <div class="lang-chip" data-lang="swift">Swift</div>
-                        <div class="lang-chip" data-lang="cpp">C/C++</div>
-                        <div class="lang-chip" data-lang="solidity">Solidity</div>
-                        <div class="lang-chip" data-lang="shell">Shell/Bash</div>
-                        <div class="lang-chip" data-lang="sql">SQL</div>
+                <div class="card">
+                    <div class="lang-grid mb-4">
+                        <div class="lang-chip active" onclick="setLang(this, 'auto')">Auto Detect</div>
+                        <div class="lang-chip" onclick="setLang(this, 'javascript')">JS</div>
+                        <div class="lang-chip" onclick="setLang(this, 'python')">Python</div>
+                        <div class="lang-chip" onclick="setLang(this, 'java')">Java</div>
                     </div>
-                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:10px;letter-spacing:1px">SAST CHECKS</div>
-                    <div class="check-grid" id="sastChecks">
-                        <div class="check-chip active" data-check="secrets"><span class="dot"></span>Hardcoded Secrets</div>
-                        <div class="check-chip active" data-check="injection"><span class="dot"></span>Injection Flaws</div>
-                        <div class="check-chip active" data-check="authz"><span class="dot"></span>Broken Auth</div>
-                        <div class="check-chip active" data-check="crypto"><span class="dot"></span>Weak Crypto</div>
-                        <div class="check-chip active" data-check="deser"><span class="dot"></span>Insecure Deser</div>
-                        <div class="check-chip active" data-check="xxe"><span class="dot"></span>XXE Injection</div>
-                        <div class="check-chip active" data-check="ssti"><span class="dot"></span>SSTI / Template</div>
-                        <div class="check-chip active" data-check="rce"><span class="dot"></span>RCE Vectors</div>
-                        <div class="check-chip active" data-check="supply"><span class="dot"></span>Supply Chain</div>
-                        <div class="check-chip active" data-check="overflow"><span class="dot"></span>Buffer Overflow</div>
-                        <div class="check-chip active" data-check="race"><span class="dot"></span>Race Conditions</div>
-                        <div class="check-chip active" data-check="logic"><span class="dot"></span>Logic Flaws</div>
+                    <div class="dropzone" onclick="document.getElementById('fileInput').click()">
+                        <input type="file" id="fileInput" class="hidden" multiple onchange="handleFiles(this.files)">
+                        <i data-lucide="upload-cloud" class="mx-auto mb-3 text-muted"></i>
+                        <div class="text-sm font-bold text-muted">Drop files or click to upload</div>
+                        <div id="fileStatus" class="text-[10px] mono text-accent mt-2"></div>
                     </div>
-                    <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragleave="this.classList.remove('drag-over')">
-                        <input type="file" id="fileInput" multiple style="display:none" onchange="handleFiles(event)">
-                        <i data-lucide="upload-cloud" class="dropzone-icon" style="width:32px;height:32px"></i>
-                        <div class="dropzone-text">Drop files or click to upload</div>
-                        <div class="dropzone-sub">JS · TS · PY · PHP · JAVA · CS · GO · RB · RS · KT · SOL · SH · SQL + more</div>
-                        <div class="file-chips" id="fileList"></div>
-                    </div>
-                    <button class="btn-primary" id="codeAuditBtn" onclick="startAudit('code')" style="margin-top:14px;width:100%" disabled>ANALYZE CODE</button>
+                    <button class="btn-primary w-full mt-4" onclick="startAudit('code')">ANALYZE CODEBASE</button>
                 </div>
             </div>
 
-            <!-- PASTE CODE TAB -->
+            <!-- PASTE TAB -->
             <div id="tab-panel-paste" class="tab-panel" style="display:none">
                 <div class="section-title">Paste & <span>Trace</span>.</div>
-                <div class="card" style="margin-bottom:16px">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                        <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);letter-spacing:1px">LANGUAGE</div>
-                        <select id="pasteLang" class="text-input" style="width:160px;padding:5px 10px;font-size:11px">
-                            <option value="auto">Auto Detect</option>
-                            <option value="javascript">JavaScript</option>
-                            <option value="typescript">TypeScript</option>
-                            <option value="python">Python</option>
-                            <option value="php">PHP</option>
-                            <option value="java">Java</option>
-                            <option value="csharp">C#</option>
-                            <option value="go">Go</option>
-                            <option value="ruby">Ruby</option>
-                            <option value="rust">Rust</option>
-                            <option value="kotlin">Kotlin</option>
-                            <option value="shell">Shell/Bash</option>
-                            <option value="sql">SQL</option>
-                            <option value="solidity">Solidity</option>
-                        </select>
-                    </div>
-                    <textarea class="code-textarea" id="pasteInput" placeholder="// Paste your code here for instant security analysis...&#10;// Supports 14+ languages with context-aware checks"></textarea>
-                    <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
-                        <button class="btn-primary" onclick="startAudit('paste')" style="flex:1">ANALYZE PASTE</button>
-                        <button class="btn-ghost" onclick="document.getElementById('pasteInput').value=''">CLEAR</button>
-                        <span style="font-family:var(--font-mono);font-size:10px;color:var(--muted)" id="pasteCharCount">0 chars</span>
-                    </div>
+                <div class="card">
+                    <textarea class="code-textarea" id="pasteInput" placeholder="// Paste source for analysis..."></textarea>
+                    <button class="btn-primary w-full mt-4" onclick="startAudit('paste')">ANALYZE PASTE</button>
                 </div>
             </div>
 
-            <!-- RESULTS AREA (shared across all tabs) -->
+            <!-- RESULTS -->
             <div id="resultsArea">
-                <div id="idleState">
-                    <i data-lucide="activity" class="idle-icon" style="width:36px;height:36px"></i>
-                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);letter-spacing:2px">AWAITING SIGNAL</div>
-                </div>
+                <div id="idleState" class="mt-8 text-center text-muted text-xs mono">AWAITING SIGNAL...</div>
                 <div id="loadingState">
                     <div class="spinner"></div>
-                    <div class="loading-phase" id="loadingPhase">INITIALIZING...</div>
-                    <div class="loading-steps" id="loadingSteps"></div>
+                    <div class="mono text-accent text-[10px] tracking-widest mt-4">TRACING VECTORS...</div>
                 </div>
-                <div id="contentState" style="display:none"></div>
+                <div id="contentState" class="mt-8 hidden"></div>
             </div>
-
-        </div><!-- /content -->
-    </div><!-- /main -->
-</div><!-- /app -->
-
-<script>
-    /* ─── STATE ─────────────────────────────────────────────────────── */
-    let currentTab = 'url';
-    let activeFilter = 'all';
-    let lastResult = null;
-
-    /* ─── TAB SWITCHING ─────────────────────────────────────────────── */
-    function switchTab(tab) {
-        currentTab = tab;
-        document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
-        document.getElementById('tab-panel-' + tab).style.display = 'block';
-        ['url','code','paste'].forEach(t => {
-            document.getElementById('tab-' + t)?.classList.toggle('active', t === tab);
-            document.getElementById('nav-' + t)?.classList.toggle('active', t === tab);
-        });
-        resetResults();
-    }
-
-    /* ─── CHECK CHIPS toggle ────────────────────────────────────────── */
-    document.querySelectorAll('.check-chip').forEach(chip => {
-        chip.addEventListener('click', () => chip.classList.toggle('active'));
-    });
-
-    /* ─── LANG CHIPS (single select) ───────────────────────────────── */
-    document.querySelectorAll('#langGrid .lang-chip').forEach(chip => {
-        chip.addEventListener('click', () => {
-            document.querySelectorAll('#langGrid .lang-chip').forEach(c => c.classList.remove('active'));
-            chip.classList.add('active');
-        });
-    });
-
-    /* ─── PASTE CHAR COUNT ──────────────────────────────────────────── */
-    document.getElementById('pasteInput').addEventListener('input', function() {
-        document.getElementById('pasteCharCount').textContent = this.value.length + ' chars';
-    });
-
-    /* ─── FILE HANDLING ─────────────────────────────────────────────── */
-    function handleDragOver(e) { e.preventDefault(); document.getElementById('dropzone').classList.add('drag-over'); }
-    function handleDrop(e) {
-        e.preventDefault();
-        document.getElementById('dropzone').classList.remove('drag-over');
-        const files = Array.from(e.dataTransfer.files);
-        processFiles(files);
-    }
-    function handleFiles(e) { processFiles(Array.from(e.target.files)); }
-    function processFiles(files) {
-        const list = document.getElementById('fileList'); list.innerHTML = '';
-        window.SAFESHIP_CONTEXT.currentFiles = [];
-        files.forEach(file => {
-            const r = new FileReader(); r.onload = ev => {
-                window.SAFESHIP_CONTEXT.currentFiles.push({ name: file.name, content: ev.target.result });
-                const chip = document.createElement('div'); chip.className = 'file-chip';
-                chip.innerHTML = `<i data-lucide="file-code" style="width:11px;height:11px;color:var(--accent)"></i>${file.name}`;
-                list.appendChild(chip); lucide.createIcons();
-                document.getElementById('codeAuditBtn').disabled = false;
-            }; r.readAsText(file);
-        });
-    }
-
-    /* ─── GET ACTIVE CHECKS ────────────────────────────────────────── */
-    function getActiveChecks(containerId) {
-        return Array.from(document.querySelectorAll(`#${containerId} .check-chip.active`))
-            .map(c => c.dataset.check);
-    }
-
-    /* ─── BUILD PROMPT ──────────────────────────────────────────────── */
-    function buildPrompt(mode) {
-        const checks = mode === 'url'
-            ? getActiveChecks('urlChecks')
-            : getActiveChecks('sastChecks');
-        const checksStr = checks.join(', ');
-
-        const schema = `Respond ONLY with a valid JSON object exactly matching this schema:
-{
-  "score": <integer 0-100>,
-  "grade": <"A"|"B"|"C"|"D"|"F">,
-  "summary": <string, 2-3 sentences>,
-  "language": <detected language string>,
-  "stats": { "critical": <int>, "high": <int>, "medium": <int>, "low": <int>, "info": <int> },
-  "findings": [
-    {
-      "title": <string>,
-      "severity": <"critical"|"high"|"medium"|"low"|"info">,
-      "category": <string>,
-      "description": <string>,
-      "location": <string, file/line/function if known>,
-      "impact": <string, what an attacker can do>,
-      "fix": <string, concrete code fix or steps>,
-      "cwe": <string, e.g. "CWE-79">
-    }
-  ]
-}`;
-
-        if (mode === 'url') {
-            const url = document.getElementById('urlInput').value.trim();
-            return `You are a professional web security auditor. Perform a comprehensive security analysis of this URL: ${url}
-
-Focus on these specific checks: ${checksStr}
-
-For each issue found, provide: what it is, where it likely exists, the security impact, a concrete fix with example code, and the relevant CWE identifier.
-Be thorough and realistic — analyze headers, authentication, input handling, API design, CORS, SSL/TLS, rate limiting, and all specified checks.
-
-${schema}`;
-        }
-
-        const lang = mode === 'paste'
-            ? document.getElementById('pastelang')?.value || 'auto'
-            : (document.querySelector('#langGrid .lang-chip.active')?.dataset.lang || 'auto');
-
-        const code = mode === 'paste'
-            ? document.getElementById('pasteInput').value
-            : window.SAFESHIP_CONTEXT.currentFiles.map(f => `// FILE: ${f.name}\n${f.content}`).join('\n\n---\n\n');
-
-        return `You are an expert SAST (Static Application Security Testing) engine. Perform a deep security audit of the following ${lang !== 'auto' ? lang : 'code (auto-detect language)'}.
-
-Focus on these vulnerability categories: ${checksStr}
-
-Language context: ${lang !== 'auto' ? `This is ${lang} code` : 'Auto-detect the language and apply language-specific security checks'}
-
-Apply language-specific security knowledge:
-- For JavaScript/TypeScript: prototype pollution, eval(), DOM XSS, unsafe npm packages patterns
-- For Python: pickle deserialization, eval/exec, SQL string formatting, os.system calls
-- For PHP: file inclusion, extract(), type juggling, unsafe deserialization
-- For Java: JNDI injection, Java deserialization, XXE, reflection misuse
-- For Go: race conditions, unsafe pointer usage, integer overflow
-- For Solidity: reentrancy, integer overflow/underflow, front-running, tx.origin auth
-- For SQL: injection patterns, excessive permissions, data exposure
-- For Shell: command injection, unquoted variables, wildcard injection
-
-For each finding: exact location (file, line number, function name), precise impact, and a concrete fix with corrected code example.
-
-CODE TO AUDIT:
-\`\`\`
-${code}
-\`\`\`
-
-${schema}`;
-    }
-
-    /* ─── LOADING STEPS ─────────────────────────────────────────────── */
-    const LOADING_STEPS = {
-        url: ['Resolving target endpoint', 'Analyzing HTTP surface', 'Running security checks', 'Compiling findings'],
-        code: ['Parsing file structure', 'Detecting language patterns', 'Running SAST engine', 'Generating report'],
-        paste: ['Parsing code structure', 'Detecting language', 'Analyzing vulnerabilities', 'Compiling findings']
-    };
-
-    function showLoading(mode) {
-        document.getElementById('idleState').style.display = 'none';
-        document.getElementById('contentState').style.display = 'none';
-        const ld = document.getElementById('loadingState'); ld.style.display = 'flex';
-        const steps = document.getElementById('loadingSteps');
-        steps.innerHTML = LOADING_STEPS[mode].map((s, i) => `
-            <div class="loading-step" id="lstep-${i}"><span class="step-dot"></span>${s}</div>`).join('');
-        let i = 0;
-        const advance = () => {
-            if (i > 0) document.getElementById(`lstep-${i-1}`)?.classList.replace('active','done');
-            if (i < LOADING_STEPS[mode].length) {
-                document.getElementById(`lstep-${i}`)?.classList.add('active');
-                document.getElementById('loadingPhase').textContent = LOADING_STEPS[mode][i].toUpperCase() + '...';
-                i++;
-                return setTimeout(advance, 900 + Math.random() * 600);
-            }
-        };
-        return advance();
-    }
-
-    /* ─── START AUDIT ───────────────────────────────────────────────── */
-    async function startAudit(mode) {
-        const keys = window.SAFESHIP_CONTEXT?.sessionKeys;
-        if (!keys?.gemini && !keys?.groq) {
-            alert('No API keys found. Check deployment pipeline logs and GitHub Secrets.');
-            return;
-        }
-        if (mode === 'paste' && !document.getElementById('pasteInput').value.trim()) {
-            alert('Please paste some code first.'); return;
-        }
-        if (mode === 'url' && !document.getElementById('urlInput').value.trim()) {
-            alert('Please enter a URL.'); return;
-        }
-
-        const timer = showLoading(mode);
-        try {
-            const prompt = buildPrompt(mode);
-            const data = await callNeuralNode(prompt);
-            clearTimeout(timer);
-
-            // Label the target
-            data.target = mode === 'url'
-                ? document.getElementById('urlInput').value.trim()
-                : mode === 'paste' ? 'Pasted Code Snippet'
-                : window.SAFESHIP_CONTEXT.currentFiles.map(f => f.name).join(', ');
-
-            lastResult = data;
-            await window.saveAuditToCloud(data);
-            renderResults(data);
-        } catch (err) {
-            clearTimeout(timer);
-            window.neuralTelemetry?.('Error', err.message);
-            document.getElementById('loadingState').style.display = 'none';
-            document.getElementById('idleState').style.display = 'flex';
-            alert('Audit failed: ' + err.message);
-        }
-    }
-
-    /* ─── RENDER RESULTS ────────────────────────────────────────────── */
-    function getScoreColor(score) {
-        if (score >= 80) return '#00ff88';
-        if (score >= 60) return '#ffb800';
-        if (score >= 40) return '#ff7b3b';
-        return '#ff3b3b';
-    }
-
-    function severityClass(sev) {
-        const s = (sev || '').toLowerCase();
-        return { critical: 'severity-critical badge-critical', high: 'severity-high badge-high', medium: 'severity-medium badge-medium', low: 'severity-low badge-low', info: 'severity-info badge-info' }[s] || 'severity-info badge-info';
-    }
-
-    function renderResults(d, filter = 'all') {
-        document.getElementById('loadingState').style.display = 'none';
-        document.getElementById('idleState').style.display = 'none';
-        const ct = document.getElementById('contentState');
-        ct.style.display = 'block';
-        lastResult = d;
-
-        const score = d.score || 0;
-        const color = getScoreColor(score);
-        const circumference = 2 * Math.PI * 44;
-        const dash = circumference * (score / 100);
-        const stats = d.stats || { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-        const findings = (d.findings || []);
-        const filtered = filter === 'all' ? findings : findings.filter(f => (f.severity||'').toLowerCase() === filter);
-
-        ct.innerHTML = `
-        <div class="card fade-in">
-            <!-- Score header -->
-            <div class="score-header">
-                <div class="score-ring-wrap">
-                    <svg viewBox="0 0 100 100" width="100" height="100">
-                        <circle cx="50" cy="50" r="44" fill="none" stroke="var(--border)" stroke-width="6"/>
-                        <circle cx="50" cy="50" r="44" fill="none" stroke="${color}" stroke-width="6"
-                            stroke-dasharray="${dash} ${circumference}" stroke-linecap="round"
-                            style="transition:stroke-dasharray 1s ease"/>
-                    </svg>
-                    <div class="score-number">
-                        <div class="score-num" style="color:${color}">${score}</div>
-                        <div class="score-pct">/ 100</div>
-                    </div>
-                </div>
-                <div class="score-meta">
-                    <div class="score-label">Security Score</div>
-                    <div class="score-grade" style="color:${color}">${d.grade || '—'} ${getGradeLabel(d.grade)}</div>
-                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-top:4px">${d.language || ''}</div>
-                    <div class="score-summary" style="margin-top:8px">${d.summary || ''}</div>
-                    <div style="margin-top:12px;display:flex;gap:8px">
-                        <button class="btn-ghost" onclick="resetResults()" style="font-size:10px;padding:6px 12px">↩ New Audit</button>
-                        <button class="btn-ghost" onclick="exportJSON()" style="font-size:10px;padding:6px 12px">↓ JSON</button>
-                        <button class="btn-ghost" onclick="exportMarkdown()" style="font-size:10px;padding:6px 12px">↓ MD Report</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Stats row -->
-            <div class="stats-row">
-                <div class="stat-box" style="border-color:rgba(255,59,59,0.3)">
-                    <div class="stat-num" style="color:var(--danger)">${stats.critical || 0}</div>
-                    <div class="stat-lbl">Critical</div>
-                </div>
-                <div class="stat-box" style="border-color:rgba(255,123,59,0.3)">
-                    <div class="stat-num" style="color:#ff7b3b">${stats.high || 0}</div>
-                    <div class="stat-lbl">High</div>
-                </div>
-                <div class="stat-box" style="border-color:rgba(255,184,0,0.3)">
-                    <div class="stat-num" style="color:var(--warn)">${stats.medium || 0}</div>
-                    <div class="stat-lbl">Medium</div>
-                </div>
-                <div class="stat-box" style="border-color:rgba(59,158,255,0.3)">
-                    <div class="stat-num" style="color:var(--info)">${stats.low || 0}</div>
-                    <div class="stat-lbl">Low</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-num" style="color:var(--muted)">${stats.info || 0}</div>
-                    <div class="stat-lbl">Info</div>
-                </div>
-                <div class="stat-box" style="border-color:var(--accent-border)">
-                    <div class="stat-num" style="color:var(--accent)">${findings.length}</div>
-                    <div class="stat-lbl">Total</div>
-                </div>
-            </div>
-
-            <!-- Filter bar -->
-            <div class="filter-bar">
-                ${['all','critical','high','medium','low','info'].map(f => `
-                    <button class="filter-btn ${activeFilter===f?'active':''}" onclick="applyFilter('${f}')">${f.toUpperCase()}</button>`).join('')}
-                <span class="filter-count" class="mono">${filtered.length} FINDINGS</span>
-            </div>
-
-            <!-- Findings -->
-            <div id="findingsList">
-                ${filtered.length === 0 ? `<div style="text-align:center;padding:32px;font-family:var(--font-mono);font-size:11px;color:var(--muted)">NO FINDINGS FOR THIS FILTER</div>` :
-                filtered.map((f, i) => {
-                    const sClasses = severityClass(f.severity);
-                    const cardClass = sClasses.split(' ')[0];
-                    const badgeClass = sClasses.split(' ')[1];
-                    return `
-                    <div class="finding-card ${cardClass}" id="finding-${i}">
-                        <div class="finding-header" onclick="toggleFinding(${i})">
-                            <div>
-                                <div class="finding-title">${f.title}</div>
-                                ${f.cwe ? `<div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);margin-top:3px">${f.cwe} · ${f.category||''}</div>` : ''}
-                            </div>
-                            <div style="display:flex;align-items:center;gap:8px">
-                                <span class="severity-badge ${badgeClass}">${(f.severity||'info').toUpperCase()}</span>
-                                <i data-lucide="chevron-down" class="finding-toggle" style="width:14px;height:14px"></i>
-                            </div>
-                        </div>
-                        <div class="finding-body">
-                            <div class="finding-location"><i data-lucide="map-pin" style="width:10px;height:10px;display:inline;vertical-align:middle;margin-right:4px"></i>${f.location || 'Location unknown'}</div>
-                            <div class="finding-desc">${f.description}</div>
-                            ${f.impact ? `<div style="background:rgba(255,59,59,0.06);border:1px solid rgba(255,59,59,0.15);border-radius:8px;padding:10px;margin-bottom:12px">
-                                <div style="font-family:var(--font-mono);font-size:9px;color:var(--danger);letter-spacing:1px;margin-bottom:4px">⚡ IMPACT</div>
-                                <div style="font-size:12px;color:var(--muted)">${f.impact}</div>
-                            </div>` : ''}
-                            <div class="finding-fix">
-                                <div class="fix-label">✦ Recommended Fix</div>
-                                <pre class="fix-code">${f.fix}</pre>
-                            </div>
-                        </div>
-                    </div>`;
-                }).join('')}
-            </div>
-        </div>`;
-        lucide.createIcons();
-    }
-
-    function getGradeLabel(g) {
-        return { A:'Excellent', B:'Good', C:'Fair', D:'Poor', F:'Critical' }[g] || '';
-    }
-
-    function applyFilter(f) {
-        activeFilter = f;
-        if (lastResult) renderResults(lastResult, f);
-    }
-
-    function toggleFinding(i) {
-        document.getElementById('finding-' + i)?.classList.toggle('expanded');
-        lucide.createIcons();
-    }
-
-    /* ─── EXPORT ────────────────────────────────────────────────────── */
-    function exportJSON() {
-        if (!lastResult) return;
-        const blob = new Blob([JSON.stringify(lastResult, null, 2)], { type: 'application/json' });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-        a.download = `safeship-audit-${Date.now()}.json`; a.click();
-    }
-
-    function exportMarkdown() {
-        if (!lastResult) return;
-        const d = lastResult;
-        let md = `# SafeShip Security Report\n\n**Score:** ${d.score}/100 (${d.grade})\n**Target:** ${d.target}\n**Language:** ${d.language || 'N/A'}\n\n## Summary\n${d.summary}\n\n## Findings (${(d.findings||[]).length})\n\n`;
-        (d.findings || []).forEach((f, i) => {
-            md += `### ${i+1}. ${f.title} [${(f.severity||'').toUpperCase()}]\n`;
-            if (f.cwe) md += `**CWE:** ${f.cwe}  \n`;
-            md += `**Location:** ${f.location}  \n**Category:** ${f.category}  \n\n${f.description}\n\n`;
-            if (f.impact) md += `**Impact:** ${f.impact}\n\n`;
-            md += `**Fix:**\n\`\`\`\n${f.fix}\n\`\`\`\n\n---\n\n`;
-        });
-        const blob = new Blob([md], { type: 'text/markdown' });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-        a.download = `safeship-report-${Date.now()}.md`; a.click();
-    }
-
-    /* ─── RESET ─────────────────────────────────────────────────────── */
-    function resetResults() {
-        document.getElementById('idleState').style.display = 'flex';
-        document.getElementById('loadingState').style.display = 'none';
-        document.getElementById('contentState').style.display = 'none';
-        activeFilter = 'all';
-        lastResult = null;
-    }
-
-    /* ─── HISTORY ───────────────────────────────────────────────────── */
-    function renderHistory() {
-        const h = window.SAFESHIP_CONTEXT?.history || [];
-        const c = document.getElementById('historyContainer');
-        if (!h.length) { c.innerHTML = '<div style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:10px;color:var(--muted)">NO TRACES YET</div>'; return; }
-        c.innerHTML = h.map(i => {
-            const color = getScoreColor(i.score || 0);
-            return `<div class="history-item">
-                <div onclick='renderResults(${JSON.stringify(i).replace(/'/g,"&apos;")})'>
-                    <div style="display:flex;justify-content:space-between;align-items:center">
-                        <span class="history-score" style="color:${color}">${i.score || 0}/100</span>
-                        <span class="history-date">${i.timestamp ? new Date(i.timestamp.seconds*1000).toLocaleDateString() : '—'}</span>
-                    </div>
-                    <div class="history-target">${i.target || 'Unknown'}</div>
-                </div>
-                <button class="history-delete" onclick="deleteAudit('${i.id}')" data-tip="Delete">
-                    <i data-lucide="trash-2" style="width:12px;height:12px"></i>
-                </button>
-            </div>`;
-        }).join('');
-        lucide.createIcons();
-    }
-</script>
+        </div>
+    </div>
+</div>
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    window.neuralTelemetry = (c, m, d=null) => console.log(`%c[NEURAL][${c}]%c ${m}`, 'color:#00ff88;font-weight:bold', 'color:#5a6060', d||'');
-
-    const isInjected = val => typeof val === 'string' && val && !val.startsWith('__') && !val.endsWith('__');
-    const getGeminiKey = () => isInjected(window.INJECTED_GEMINI_KEY) ? window.INJECTED_GEMINI_KEY : null;
-    const getGroqKey   = () => isInjected(window.INJECTED_GROQ_KEY)   ? window.INJECTED_GROQ_KEY   : null;
-    const getFirebaseConfig = () => {
-        const r = window.INJECTED_FIREBASE;
-        return (r && typeof r === 'object' && r.apiKey) ? r : null;
+    window.STATE = {
+        lang: 'auto',
+        files: [],
+        appId: 'safeship-v7-full'
     };
 
-    const appId = 'safeship-trace-v7';
-    window.SAFESHIP_CONTEXT = {
-        db: null, auth: null, appId, user: null, history: [], currentFiles: [],
-        sessionKeys: { gemini: getGeminiKey(), groq: getGroqKey() }
-    };
+    // Firebase
+    if (window.SS_FB_CONF) {
+        const app = initializeApp(window.SS_FB_CONF);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        window.DB = db;
 
-    /* ── Status UI ── */
-    function setStatus(label, state) {
-        document.getElementById('statusLabel').textContent = label;
-        const dot = document.getElementById('statusDot');
-        dot.className = 'status-dot' + (state === 'active' ? ' active' : state === 'warn' ? ' warn' : state === 'error' ? ' error' : '');
-    }
-
-    /* ── Firebase init ── */
-    const config = getFirebaseConfig();
-    if (config) {
-        try {
-            const app = initializeApp(config);
-            const auth = getAuth(app);
-            const db = getFirestore(app);
-            window.SAFESHIP_CONTEXT.auth = auth;
-            window.SAFESHIP_CONTEXT.db = db;
-            onAuthStateChanged(auth, user => {
-                window.SAFESHIP_CONTEXT.user = user;
-                const el = document.getElementById('userIdText');
-                if (el) el.textContent = user ? user.uid.slice(0,20)+'...' : 'Connecting...';
-                if (user) { setStatus('Cloud Linked', 'active'); loadHistory(user.uid); }
-            });
-            setStatus('Connecting', '');
-            await signInAnonymously(auth);
-            neuralTelemetry('Firebase', 'Uplink established');
-        } catch (e) {
-            neuralTelemetry('Firebase', 'Init error', e);
-            setStatus('DB Offline', 'error');
-        }
+        onAuthStateChanged(auth, user => {
+            if (user) {
+                document.getElementById('userIdText').innerText = user.uid.slice(0,18);
+                document.getElementById('statusDot').classList.add('active');
+                document.getElementById('statusLabel').innerText = "Link Established";
+                loadHistory(user.uid);
+            }
+        });
+        signInAnonymously(auth);
     } else {
-        neuralTelemetry('Firebase', 'Standalone mode');
-        setStatus('Standalone', '');
+        document.getElementById('statusLabel').innerText = "Standalone Mode";
     }
 
-    /* ── Key status ── */
-    const { gemini, groq } = window.SAFESHIP_CONTEXT.sessionKeys;
-    if (gemini) { neuralTelemetry('Engine', 'Gemini node online'); if (!config) setStatus('Neural Active', 'active'); }
-    else if (groq) { neuralTelemetry('Engine', 'Groq fallback online'); if (!config) setStatus('Groq Fallback', 'warn'); }
-    else { neuralTelemetry('Engine', 'CRITICAL: No AI keys'); setStatus('No Keys', 'error'); }
-
-    /* ── Firestore ── */
-    function loadHistory(userId) {
-        const { db, appId } = window.SAFESHIP_CONTEXT;
-        if (!db) return;
-        onSnapshot(collection(db, 'artifacts', appId, 'users', userId, 'audits'), snap => {
-            window.SAFESHIP_CONTEXT.history = snap.docs
-                .map(d => ({ id: d.id, ...d.data() }))
-                .sort((a, b) => (b.timestamp?.seconds||0) - (a.timestamp?.seconds||0));
-            renderHistory();
-        }, err => neuralTelemetry('History', 'Access error', err));
+    async function loadHistory(uid) {
+        if (!window.DB) return;
+        const q = collection(window.DB, 'artifacts', window.STATE.appId, 'users', uid, 'audits');
+        onSnapshot(q, snap => {
+            const container = document.getElementById('historyContainer');
+            container.innerHTML = snap.docs.map(doc => `
+                <div class="history-item text-[10px] mono text-muted">
+                    <span class="text-accent">${doc.data().score}</span> | ${doc.data().target}
+                </div>
+            `).join('');
+        });
     }
 
-    window.saveAuditToCloud = async data => {
-        const { db, user, appId } = window.SAFESHIP_CONTEXT;
-        if (!db || !user) return;
-        try { await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'audits'), { ...data, timestamp: serverTimestamp() }); }
-        catch(e) { neuralTelemetry('Storage', 'Write error', e); }
+    window.switchTab = (tab) => {
+        document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+        document.getElementById(`tab-panel-${tab}`).style.display = 'block';
+        document.querySelectorAll('.nav-item, .tab-btn').forEach(i => i.classList.remove('active'));
+        document.getElementById(`nav-${tab}`).classList.add('active');
+        document.getElementById(`tab-${tab}`).classList.add('active');
     };
 
-    window.deleteAudit = async id => {
-        const { db, user, appId } = window.SAFESHIP_CONTEXT;
-        if (!db || !user) return;
-        try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'audits', id)); }
-        catch(e) { neuralTelemetry('Storage', 'Delete error', e); }
+    window.setLang = (el, l) => {
+        document.querySelectorAll('.lang-chip').forEach(c => c.classList.remove('active'));
+        el.classList.add('active');
+        window.STATE.lang = l;
     };
 
-    /* ── AI API calls ── */
-    window.callNeuralNode = async prompt => {
-        const { gemini, groq } = window.SAFESHIP_CONTEXT.sessionKeys;
-        if (gemini) {
-            try { return await callGemini(gemini, prompt); }
-            catch(e) { if (groq) return await callGroq(groq, prompt); throw e; }
+    window.handleFiles = (fs) => {
+        window.STATE.files = [];
+        Array.from(fs).forEach(f => {
+            const r = new FileReader();
+            r.onload = e => window.STATE.files.push({ name: f.name, content: e.target.result });
+            r.readAsText(f);
+        });
+        document.getElementById('fileStatus').innerText = `${fs.length} files loaded`;
+    };
+
+    window.startAudit = async (mode) => {
+        let content = "";
+        if (mode === 'url') content = document.getElementById('urlInput').value;
+        else if (mode === 'paste') content = document.getElementById('pasteInput').value;
+        else content = window.STATE.files.map(f => `// FILE: ${f.name}\n${f.content}`).join('\n\n');
+
+        if (!content) return;
+
+        document.getElementById('idleState').style.display = 'none';
+        document.getElementById('loadingState').style.display = 'flex';
+        document.getElementById('contentState').classList.add('hidden');
+
+        try {
+            const data = await callAI(content);
+            renderResults(data, content.slice(0, 20));
+            if (window.DB && getAuth().currentUser) {
+                addDoc(collection(window.DB, 'artifacts', window.STATE.appId, 'users', getAuth().currentUser.uid, 'audits'), {
+                    target: content.slice(0, 25),
+                    score: data.score,
+                    timestamp: serverTimestamp()
+                });
+            }
+        } catch (e) {
+            alert("Trace Failed: " + e.message);
+        } finally {
+            document.getElementById('loadingState').style.display = 'none';
         }
-        if (groq) return await callGroq(groq, prompt);
-        throw new Error('No API keys configured.');
     };
 
-    async function callGemini(key, prompt) {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } })
-        });
-        if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
-        const d = await res.json();
-        return JSON.parse(d.candidates[0].content.parts[0].text);
+    async function callAI(text) {
+        const prompt = `Security Audit: ${text}. Return JSON: {score, grade, summary, stats:{critical,high,medium,low}, findings:[{title, severity, description, fix}]}`;
+        
+        // Use Gemini 1.5 Flash (Stable)
+        const geminiKey = window.SS_KEY_G;
+        if (geminiKey && !geminiKey.includes("[[")) {
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } })
+                });
+                if (res.ok) {
+                    const json = await res.json();
+                    return JSON.parse(json.candidates[0].content.parts[0].text);
+                }
+            } catch (e) { console.warn("Gemini Node Offline"); }
+        }
+
+        // Groq Fallback
+        const groqKey = window.SS_KEY_Q;
+        if (groqKey && !groqKey.includes("[[")) {
+            const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } })
+            });
+            const json = await res.json();
+            return JSON.parse(json.choices[0].message.content);
+        }
+
+        throw new Error("No available neural nodes.");
     }
 
-    async function callGroq(key, prompt) {
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } })
-        });
-        if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`);
-        const d = await res.json();
-        return JSON.parse(d.choices[0].message.content);
+    function renderResults(d, target) {
+        const ct = document.getElementById('contentState');
+        ct.classList.remove('hidden');
+        
+        const score = d.score || 0;
+        const circumference = 2 * Math.PI * 44;
+        const offset = circumference - (score / 100) * circumference;
+        const stats = d.stats || { critical: 0, high: 0, medium: 0, low: 0 };
+
+        ct.innerHTML = `
+            <div class="card mb-6">
+                <div class="flex items-center gap-6 mb-6">
+                    <div class="score-ring-wrap">
+                        <svg viewBox="0 0 100 100" width="100" height="100">
+                            <circle cx="50" cy="50" r="44" fill="none" stroke="var(--border)" stroke-width="6"/>
+                            <circle cx="50" cy="50" r="44" fill="none" stroke="var(--accent)" stroke-width="6" 
+                                stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" stroke-linecap="round"/>
+                        </svg>
+                        <div class="score-number">
+                            <div class="score-num text-accent">${score}</div>
+                            <div class="text-[8px] mono text-muted">SCORE</div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-[10px] mono text-muted uppercase tracking-widest mb-1">Audit Summary</div>
+                        <div class="text-xl font-bold mb-2">${d.grade || 'Trace Result'}</div>
+                        <p class="text-xs text-muted leading-relaxed">${d.summary}</p>
+                    </div>
+                </div>
+
+                <div class="flex gap-2">
+                    <div class="stat-box"><div class="stat-num text-danger">${stats.critical}</div><div class="stat-lbl">Crit</div></div>
+                    <div class="stat-box"><div class="stat-num text-[#ff7b3b]">${stats.high}</div><div class="stat-lbl">High</div></div>
+                    <div class="stat-box"><div class="stat-num text-warn">${stats.medium}</div><div class="stat-lbl">Med</div></div>
+                    <div class="stat-box"><div class="stat-num text-info">${stats.low}</div><div class="stat-lbl">Low</div></div>
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                ${(d.findings || []).map(f => `
+                    <div class="finding-card">
+                        <div class="finding-header">
+                            <span class="text-xs font-bold">${f.title}</span>
+                            <span class="severity-badge badge-${f.severity.toLowerCase()}">${f.severity.toUpperCase()}</span>
+                        </div>
+                        <div class="px-4 pb-4">
+                            <p class="text-[11px] text-muted leading-relaxed mb-3">${f.description}</p>
+                            <div class="bg-black border border-border rounded p-3 text-[10px] mono text-accent">
+                                <div class="text-muted mb-1">// RECOMMENDATION</div>
+                                ${f.fix}
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+        lucide.createIcons();
     }
 
     lucide.createIcons();
 </script>
+
 </body>
 </html>
