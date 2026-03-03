@@ -1,104 +1,52 @@
-name: SafeShip Neural Deployment Pipeline
+name: Deploy to GitHub Pages
 
 on:
   push:
-    branches:
-      - main
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
+    branches: [main]
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: '18'
-
-      - name: Install Dependencies
-        run: npm ci
-
-      - name: Verify API Keys Configuration
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      
+      - run: npm ci
+      
+      - name: Build static site
         run: |
-          echo "[*] Neural Handshake: Verifying API credentials..."
-          if [ -z "$GEMINI_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
-            echo "[!] CRITICAL: Both GEMINI_API_KEY and GROQ_API_KEY are missing!"
-            exit 1
-          fi
-          if [ -z "$GEMINI_API_KEY" ]; then
-            echo "[!] WARNING: GEMINI_API_KEY is empty (will use Groq fallback)"
-          fi
-          if [ -z "$GROQ_API_KEY" ]; then
-            echo "[!] WARNING: GROQ_API_KEY is empty (will use Gemini only)"
-          fi
-          echo "[*] Credentials validated. Proceeding with deployment..."
-
-      - name: Create Environment File
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: |
-          cat > .env << EOF
-          GEMINI_API_KEY=$GEMINI_API_KEY
-          GROQ_API_KEY=$GROQ_API_KEY
-          NODE_ENV=production
-          PORT=3000
-          EOF
-          echo "[*] Environment file created securely"
-
+          mkdir -p dist
+          cp index.html dist/
+          cp -r node_modules dist/
+      
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
-          user_name: 'github-actions[bot]'
-          user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: "SafeShip v6.2.4: Neural Deployment Complete [skip ci]"
-          cname: safeship-trace.dev  # Change to your custom domain if needed
+          publish_dir: ./dist
+          cname: yourdomain.com  # Optional: your custom domain
 
-  deploy-to-vercel:
-    needs: build-and-deploy
+  backend-deploy:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Deploy to Vercel
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - run: npm ci
+      
+      - name: Deploy Backend (Heroku example)
         env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
-            --prod \
-            --env GEMINI_API_KEY=$GEMINI_API_KEY \
-            --env GROQ_API_KEY=$GROQ_API_KEY
-
-  notify-deployment:
-    needs: build-and-deploy
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Deployment Summary
-        run: |
-          echo "=== SafeShip v6.2.4 Deployment Summary ==="
-          echo "✓ Code deployed to GitHub Pages"
-          echo "✓ API keys securely injected via environment variables"
-          echo "✓ Backend proxy running (Node.js + Express)"
-          echo "✓ Gemini → Groq fallback enabled"
-          echo "✓ Keys NOT exposed in frontend"
-          echo ""
-          echo "Next steps:"
-          echo "1. Deploy backend to Vercel, Heroku, or your preferred platform"
-          echo "2. Update frontend API_BASE to point to your backend"
-          echo "3. Test audit functionality"
+          npm install -g heroku
+          heroku login
+          heroku create safeship-backend --region us
+          heroku config:set GEMINI_API_KEY=$GEMINI_API_KEY
+          heroku config:set GROQ_API_KEY=$GROQ_API_KEY
+          git push heroku main
