@@ -1,190 +1,81 @@
-// SafeShip Trace Engine v6.2.4 - Secure Backend Proxy
-// This server proxies API calls and keeps API keys SECRET on the server
+/**
+ * SafeShip Trace Engine — server.js (Cloudflare Worker)
+ * 
+ * DEPLOY: https://workers.cloudflare.com → Create Worker → paste this
+ * SECRETS: Worker Dashboard → Settings → Variables → add:
+ *   GEMINI_API_KEY  = your key (get from aistudio.google.com)
+ *   GROQ_API_KEY    = your NEW key (old one was exposed — regenerate at console.groq.com)
+ */
 
-const express = require('express');
-const cors = require('cors');
-const axios = require('axios');
-const path = require('path');
-require('dotenv').config();
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Content-Type': 'application/json',
+};
 
-const app = express();
-app.use(express.json());
-app.use(cors());
+const reply = (data, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: CORS });
 
-// ──────────────────────────────────────────────────────────────────
-// API Key Management (loaded from environment variables)
-// ──────────────────────────────────────────────────────────────────
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+export default {
+  async fetch(request, env) {
+    if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
+    if (request.method !== 'POST') return reply({ error: 'Method Not Allowed' }, 405);
 
-if (!GEMINI_API_KEY && !GROQ_API_KEY) {
-  console.warn('[!] WARNING: Neither GEMINI_API_KEY nor GROQ_API_KEY is set. Audit will fail.');
-}
+    let body;
+    try { body = await request.json(); }
+    catch { return reply({ error: 'Invalid JSON body' }, 400); }
 
-console.log('[*] SafeShip Engine initialized');
-console.log(`[*] Gemini available: ${!!GEMINI_API_KEY}`);
-console.log(`[*] Groq available: ${!!GROQ_API_KEY}`);
+    const path = new URL(request.url).pathname;
 
-// ──────────────────────────────────────────────────────────────────
-// Gemini Audit Endpoint
-// ──────────────────────────────────────────────────────────────────
-app.post('/api/audit/gemini', async (req, res) => {
-  try {
-    const { code } = req.body;
-
-    if (!code) {
-      return res.status(400).json({ error: 'No code provided' });
-    }
-
-    if (!GEMINI_API_KEY) {
-      return res.status(503).json({ 
-        error: 'Gemini API key not configured',
-        fallback: 'Try Groq endpoint'
-      });
-    }
-
-    const prompt = `Perform a high-precision security audit (SAST) on the following code. Detect hardcoded secrets, XSS, SQL injection, and other vulnerabilities.
-
-Respond ONLY with a valid JSON object matching this schema:
-{
-  "score": number (0-100),
-  "summary": "string",
-  "findings": [{"title": "string", "severity": "CRITICAL|HIGH|MEDIUM|LOW", "description": "string", "location": "string", "fix": "string"}]
-}
-
-CODE TO AUDIT:
-${code}`;
-
-    const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          temperature: 0.3,
-          maxOutputTokens: 2048
-        }
-      },
-      { timeout: 30000 }
-    );
-
-    if (response.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-      const auditResult = JSON.parse(response.data.candidates[0].content.parts[0].text);
-      res.json({ success: true, engine: 'gemini', data: auditResult });
-    } else {
-      throw new Error('Unexpected Gemini response format');
-    }
-  } catch (error) {
-    console.error('[!] Gemini Error:', error.message);
-    res.status(500).json({ 
-      error: 'Gemini audit failed',
-      message: error.message,
-      fallback: 'Try Groq endpoint'
-    });
-  }
-});
-
-// ──────────────────────────────────────────────────────────────────
-// Groq Audit Endpoint (Fallback)
-// ──────────────────────────────────────────────────────────────────
-app.post('/api/audit/groq', async (req, res) => {
-  try {
-    const { code } = req.body;
-
-    if (!code) {
-      return res.status(400).json({ error: 'No code provided' });
-    }
-
-    if (!GROQ_API_KEY) {
-      return res.status(503).json({ 
-        error: 'Groq API key not configured'
-      });
-    }
-
-    const prompt = `Perform a high-precision security audit (SAST) on the following code. Detect hardcoded secrets, XSS, SQL injection, and other vulnerabilities.
-
-Respond ONLY with a valid JSON object matching this schema:
-{
-  "score": number (0-100),
-  "summary": "string",
-  "findings": [{"title": "string", "severity": "CRITICAL|HIGH|MEDIUM|LOW", "description": "string", "location": "string", "fix": "string"}]
-}
-
-CODE TO AUDIT:
-${code}`;
-
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'mixtral-8x7b-32768',
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.3,
-        max_tokens: 2048
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
+    // ── /gemini ────────────────────────────────────────────────────────
+    if (path === '/gemini') {
+      if (!env.GEMINI_API_KEY) return reply({ error: 'GEMINI_API_KEY not set in Worker env' }, 500);
+      try {
+        // ✅ FIXED model name — was "gemini-2.5-flash-preview-09-2025" (caused 404)
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${env.GEMINI_API_KEY}`;
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        if (!r.ok) return reply({ error: `Gemini API ${r.status}`, details: d }, r.status);
+        return reply(d);
+      } catch (e) {
+        return reply({ error: 'Gemini fetch failed', message: e.message }, 502);
       }
-    );
-
-    if (response.data?.choices?.[0]?.message?.content) {
-      const auditResult = JSON.parse(response.data.choices[0].message.content);
-      res.json({ success: true, engine: 'groq', data: auditResult });
-    } else {
-      throw new Error('Unexpected Groq response format');
     }
-  } catch (error) {
-    console.error('[!] Groq Error:', error.message);
-    res.status(500).json({ 
-      error: 'Groq audit failed',
-      message: error.message
-    });
+
+    // ── /groq ──────────────────────────────────────────────────────────
+    if (path === '/groq') {
+      if (!env.GROQ_API_KEY) return reply({ error: 'GROQ_API_KEY not set in Worker env' }, 500);
+      try {
+        const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${env.GROQ_API_KEY}`,
+          },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        if (!r.ok) return reply({ error: `Groq API ${r.status}`, details: d }, r.status);
+        return reply(d);
+      } catch (e) {
+        return reply({ error: 'Groq fetch failed', message: e.message }, 502);
+      }
+    }
+
+    // ── /health ────────────────────────────────────────────────────────
+    if (path === '/health') {
+      return reply({
+        status: 'online',
+        gemini: env.GEMINI_API_KEY ? 'configured' : 'MISSING',
+        groq:   env.GROQ_API_KEY   ? 'configured' : 'MISSING',
+      });
+    }
+
+    return reply({ error: 'Unknown route. Use /gemini or /groq' }, 404);
   }
-});
-
-// ──────────────────────────────────────────────────────────────────
-// Health Check
-// ──────────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'online',
-    engines: {
-      gemini: !!GEMINI_API_KEY,
-      groq: !!GROQ_API_KEY
-    },
-    timestamp: new Date().toISOString()
-  });
-});
-
-// ──────────────────────────────────────────────────────────────────
-// Serve Static Files (Frontend)
-// ──────────────────────────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// ──────────────────────────────────────────────────────────────────
-// Error Handler
-// ──────────────────────────────────────────────────────────────────
-app.use((err, req, res, next) => {
-  console.error('[!] Unhandled Error:', err);
-  res.status(500).json({ error: 'Internal Server Error' });
-});
-
-// ──────────────────────────────────────────────────────────────────
-// Start Server
-// ──────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`[*] SafeShip Engine running on port ${PORT}`);
-  console.log(`[*] Neural Handshake Complete`);
-});
+};
