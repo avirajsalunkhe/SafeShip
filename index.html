@@ -10,9 +10,9 @@
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <script>
-        var INJECTED_GEMINI_KEY = "AIzaSyC6TvnhX04iXxg3e8BHsSBXByPVpUsfPAA";
-        var INJECTED_GROQ_KEY   = "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";
-        var INJECTED_FIREBASE   = {"apiKey": "AIzaSyB_d7N2FTeD0mrO-odMx2ajwtVIHOOKig0", "authDomain": "safeship-trace.firebaseapp.com", "projectId": "safeship-trace", "storageBucket": "safeship-trace.firebasestorage.app", "messagingSenderId": "538497558292", "appId": "1:538497558292:web:0e512311b343b5ec1f0401", "measurementId": "G-Z097L20KCF"};
+        var INJECTED_GEMINI_KEY = "__GEMINI_API_KEY__";
+        var INJECTED_GROQ_KEY   = "__GROQ_API_KEY__";
+        var INJECTED_FIREBASE   = __FIREBASE_CONFIG_JSON__;
     </script>
 
     <style>
@@ -938,7 +938,7 @@ ${schema}`;
     };
 
     async function callGemini(key, prompt) {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`, {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } })
         });
