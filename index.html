@@ -1,1 +1,1288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeShip | Neural Trace Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
 
+    <script>
+        // ✅ SECURE: No API keys here. All AI calls go through server.js (Cloudflare Worker).
+        // Only the Worker URL and Firebase config are injected at build time.
+        var WORKER_URL        = "__WORKER_URL__";
+        var INJECTED_FIREBASE = __FIREBASE_CONFIG_JSON__;
+    </script>
+
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #080909;
+            --surface: #0f1010;
+            --border: #1e2020;
+            --border-bright: #2a2d2d;
+            --text: #e8eaea;
+            --muted: #5a6060;
+            --accent: #00ff88;
+            --accent-dim: rgba(0,255,136,0.08);
+            --accent-border: rgba(0,255,136,0.2);
+            --warn: #ffb800;
+            --danger: #ff3b3b;
+            --info: #3b9eff;
+            --font-display: 'Syne', sans-serif;
+            --font-mono: 'IBM Plex Mono', monospace;
+        }
+        html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-display); overflow: hidden; }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+        .mono { font-family: var(--font-mono); }
+
+        /* Layout */
+        #app { display: flex; height: 100vh; }
+        #sidebar { width: 260px; min-width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+        #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        #topbar { height: 56px; min-height: 56px; background: rgba(8,9,9,0.9); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; backdrop-filter: blur(12px); }
+        #content { flex: 1; overflow-y: auto; padding: 32px; }
+
+        /* Sidebar */
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
+        .logo { display: flex; align-items: center; gap: 10px; }
+        .logo-icon { width: 32px; height: 32px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .logo-icon svg { color: #000; width: 18px; height: 18px; }
+        .logo-text { font-size: 15px; font-weight: 800; letter-spacing: -0.5px; }
+        .sidebar-nav { padding: 8px; border-bottom: 1px solid var(--border); }
+        .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; color: var(--muted); transition: all 0.15s; border: 1px solid transparent; }
+        .nav-item:hover { background: var(--accent-dim); color: var(--text); }
+        .nav-item.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-border); }
+        .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+        .nav-badge { margin-left: auto; font-family: var(--font-mono); font-size: 9px; padding: 2px 6px; border-radius: 4px; background: var(--border); color: var(--muted); }
+        .nav-badge.new { background: rgba(0,255,136,0.15); color: var(--accent); }
+        .sidebar-section-title { font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px; color: var(--muted); padding: 16px 20px 8px; text-transform: uppercase; }
+        .history-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+        .history-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: all 0.15s; position: relative; margin-bottom: 4px; }
+        .history-item:hover { background: var(--accent-dim); border-color: var(--accent-border); }
+        .history-score { font-family: var(--font-mono); font-size: 11px; font-weight: 700; }
+        .history-target { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+        .history-date { font-family: var(--font-mono); font-size: 9px; color: var(--muted); }
+        .history-delete { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); opacity: 0; transition: opacity 0.15s; color: var(--danger); cursor: pointer; }
+        .history-item:hover .history-delete { opacity: 1; }
+        .sidebar-footer { padding: 12px; border-top: 1px solid var(--border); }
+        .credit-footer { margin-top: 2px; }
+        .credit-divider { height: 1px; background: linear-gradient(to right, transparent, var(--accent-border), transparent); margin-bottom: 10px; }
+        .credit-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+        .credit-copy { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; }
+        .credit-github { color: var(--muted); display: flex; align-items: center; transition: color 0.2s, transform 0.2s; }
+        .credit-github:hover { color: var(--accent); transform: scale(1.15); }
+        .credit-by { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 0.5px; line-height: 1.7; }
+        .credit-name { color: var(--accent); text-decoration: none; font-weight: 700; letter-spacing: 0.5px; transition: opacity 0.2s; display: inline-flex; align-items: center; gap: 2px; }
+        .credit-name:hover { opacity: 0.75; text-decoration: underline; text-underline-offset: 3px; }
+        .node-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; }
+        .node-avatar { width: 28px; height: 28px; background: var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .node-id { font-family: var(--font-mono); font-size: 9px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 140px; }
+
+        /* Topbar */
+        .tabs { display: flex; gap: 4px; }
+        .tab-btn { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 6px 14px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; background: transparent; color: var(--muted); transition: all 0.15s; text-transform: uppercase; }
+        .tab-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-border); }
+        .tab-btn:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.04); }
+        .status-pill { display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface); }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-bright); }
+        .status-dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse-dot 2s infinite; }
+        .status-dot.warn { background: var(--warn); }
+        .status-dot.error { background: var(--danger); }
+        @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .status-label { font-family: var(--font-mono); font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+
+        /* Cards & Forms */
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; }
+        .section-title { font-size: 28px; font-weight: 800; letter-spacing: -1px; line-height: 1.1; margin-bottom: 20px; }
+        .section-title span { color: var(--accent); }
+        .input-row { display: flex; gap: 10px; }
+        .text-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-family: var(--font-mono); font-size: 13px; color: var(--text); outline: none; transition: border-color 0.15s; }
+        .text-input:focus { border-color: var(--accent-border); }
+        .text-input::placeholder { color: var(--muted); }
+        .btn-primary { background: var(--accent); color: #000; font-family: var(--font-display); font-weight: 800; font-size: 12px; letter-spacing: 1px; padding: 12px 24px; border-radius: 10px; border: none; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+        .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+        .btn-primary:active { transform: translateY(0); }
+        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); font-family: var(--font-display); font-weight: 700; font-size: 11px; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
+        .btn-ghost:hover { color: var(--text); border-color: var(--border-bright); }
+
+        /* Language selector */
+        .lang-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+        .lang-chip { font-family: var(--font-mono); font-size: 10px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted); cursor: pointer; transition: all 0.15s; background: transparent; }
+        .lang-chip:hover { border-color: var(--accent-border); color: var(--text); }
+        .lang-chip.active { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
+
+        /* Check categories */
+        .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-bottom: 20px; }
+        .check-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; font-size: 11px; font-weight: 700; color: var(--muted); background: transparent; user-select: none; }
+        .check-chip:hover { border-color: var(--accent-border); color: var(--text); }
+        .check-chip.active { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
+        .check-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-bright); flex-shrink: 0; transition: background 0.15s; }
+        .check-chip.active .dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+
+        /* Drop zone */
+        .dropzone { border: 2px dashed var(--border); border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; position: relative; }
+        .dropzone:hover, .dropzone.drag-over { border-color: var(--accent-border); background: var(--accent-dim); }
+        .dropzone-icon { color: var(--muted); margin: 0 auto 12px; display: block; }
+        .dropzone-text { font-size: 13px; font-weight: 700; color: var(--muted); }
+        .dropzone-sub { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-top: 4px; opacity: 0.7; }
+        .file-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+        .file-chip { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+
+        /* Code textarea */
+        .code-textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text); outline: none; resize: vertical; min-height: 160px; transition: border-color 0.15s; line-height: 1.6; }
+        .code-textarea:focus { border-color: var(--accent-border); }
+        .code-textarea::placeholder { color: var(--muted); }
+
+        /* Loading */
+        #loadingState { display: none; flex-direction: column; align-items: center; justify-content: center; height: 320px; gap: 20px; }
+        .spinner { width: 40px; height: 40px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-phase { font-family: var(--font-mono); font-size: 11px; color: var(--accent); letter-spacing: 2px; animation: blink 1.5s ease-in-out infinite; }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .loading-steps { display: flex; flex-direction: column; gap: 6px; width: 280px; }
+        .loading-step { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+        .loading-step.done { color: var(--accent); }
+        .loading-step.active { color: var(--text); }
+        .step-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+        .loading-step.done .step-dot { background: var(--accent); }
+        .loading-step.active .step-dot { background: var(--text); animation: pulse-dot 1s infinite; }
+
+        /* Results */
+        .score-ring-wrap { position: relative; width: 100px; height: 100px; flex-shrink: 0; }
+        .score-ring-wrap svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+        .score-number { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .score-num { font-size: 26px; font-weight: 800; letter-spacing: -2px; line-height: 1; }
+        .score-pct { font-family: var(--font-mono); font-size: 9px; color: var(--muted); }
+        .score-header { display: flex; align-items: center; gap: 24px; margin-bottom: 20px; }
+        .score-meta { flex: 1; }
+        .score-label { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
+        .score-grade { font-size: 22px; font-weight: 800; }
+        .score-summary { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 4px; }
+        .findings-header { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .findings-header span { background: var(--border); border-radius: 4px; padding: 2px 8px; color: var(--text); }
+        .finding-card { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 10px; transition: border-color 0.15s; }
+        .finding-card:hover { border-color: var(--border-bright); }
+        .finding-card.severity-critical { border-left: 3px solid var(--danger); }
+        .finding-card.severity-high { border-left: 3px solid #ff7b3b; }
+        .finding-card.severity-medium { border-left: 3px solid var(--warn); }
+        .finding-card.severity-low { border-left: 3px solid var(--info); }
+        .finding-card.severity-info { border-left: 3px solid var(--muted); }
+        .finding-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 14px 16px 0; gap: 12px; cursor: pointer; }
+        .finding-title { font-size: 13px; font-weight: 700; }
+        .finding-body { padding: 0 16px 14px; margin-top: 10px; }
+        .finding-location { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-bottom: 8px; }
+        .finding-desc { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 12px; }
+        .finding-fix { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+        .fix-label { font-family: var(--font-mono); font-size: 9px; color: var(--accent); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px; }
+        .fix-code { font-family: var(--font-mono); font-size: 11px; color: #a8d8b0; white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+        .severity-badge { font-family: var(--font-mono); font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 4px; white-space: nowrap; letter-spacing: 1px; flex-shrink: 0; }
+        .badge-critical { background: rgba(255,59,59,0.15); color: var(--danger); }
+        .badge-high { background: rgba(255,123,59,0.15); color: #ff7b3b; }
+        .badge-medium { background: rgba(255,184,0,0.15); color: var(--warn); }
+        .badge-low { background: rgba(59,158,255,0.15); color: var(--info); }
+        .badge-info { background: rgba(90,96,96,0.2); color: var(--muted); }
+        .stats-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+        .stat-box { flex: 1; min-width: 80px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
+        .stat-num { font-size: 22px; font-weight: 800; letter-spacing: -1px; }
+        .stat-lbl { font-family: var(--font-mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; margin-top: 2px; }
+
+        /* Filter bar */
+        .filter-bar { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+        .filter-btn { font-family: var(--font-mono); font-size: 9px; font-weight: 700; padding: 4px 10px; border-radius: 5px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; transition: all 0.15s; letter-spacing: 1px; text-transform: uppercase; }
+        .filter-btn.active { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
+        .filter-count { font-family: var(--font-mono); font-size: 9px; color: var(--muted); margin-left: auto; }
+        .export-bar { display: flex; gap: 8px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+
+        /* Idle */
+        #idleState { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 280px; border: 1px dashed var(--border); border-radius: 16px; color: var(--muted); }
+        .idle-icon { color: var(--border-bright); margin-bottom: 12px; }
+
+        /* Tooltip */
+        [data-tip] { position: relative; }
+        [data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #1a1d1d; border: 1px solid var(--border); color: var(--text); font-family: var(--font-mono); font-size: 10px; padding: 5px 10px; border-radius: 6px; white-space: nowrap; z-index: 100; pointer-events: none; }
+
+        /* Animations */
+        .fade-in { animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Collapsed finding body */
+        .finding-body { display: none; }
+        .finding-card.expanded .finding-body { display: block; }
+        .finding-toggle { color: var(--muted); transition: transform 0.2s; flex-shrink: 0; margin-top: 2px; }
+        .finding-card.expanded .finding-toggle { transform: rotate(180deg); }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            #sidebar { display: none; }
+            #content { padding: 16px; }
+        }
+
+        /* ── AI Sentinel Styles ───────────────────────────── */
+        .sentinel-textarea { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:14px; font-family:var(--font-mono); font-size:12px; color:var(--text); outline:none; resize:vertical; min-height:140px; transition:border-color 0.15s; line-height:1.6; }
+        .sentinel-textarea:focus { border-color:var(--accent-border); }
+        .sentinel-textarea::placeholder { color:var(--muted); }
+        .s-tier { background:var(--bg); border:1px solid var(--border); border-radius:12px; overflow:hidden; margin-bottom:12px; }
+        .s-tier-head { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--border); }
+        .s-tier-body { padding:14px 16px; }
+        .tier-pill { font-family:var(--font-mono); font-size:9px; font-weight:700; padding:3px 9px; border-radius:4px; letter-spacing:1px; flex-shrink:0; }
+        .t1 { background:rgba(59,158,255,0.12); color:var(--info); }
+        .t2 { background:rgba(255,184,0,0.12); color:var(--warn); }
+        .t3 { background:rgba(255,59,59,0.12); color:var(--danger); }
+        .t4 { background:rgba(0,255,136,0.12); color:var(--accent); }
+        .s-metric { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); }
+        .s-metric:last-child { border-bottom:none; }
+        .s-metric-lbl { font-family:var(--font-mono); font-size:10px; color:var(--muted); }
+        .s-metric-val { font-family:var(--font-mono); font-size:11px; font-weight:700; }
+        .bar-wrap { margin:10px 0; }
+        .bar-lbl { display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:9px; color:var(--muted); margin-bottom:5px; }
+        .bar-track { height:6px; background:var(--border); border-radius:3px; overflow:hidden; }
+        .bar-fill { height:100%; border-radius:3px; transition:width 1.2s ease; }
+        .diff-wrap { background:#050905; border:1px solid #1a2a1a; border-radius:10px; overflow:hidden; margin-top:12px; }
+        .diff-head { display:flex; align-items:center; justify-content:space-between; padding:8px 14px; border-bottom:1px solid #1a2a1a; }
+        .diff-body { padding:12px 14px; font-family:var(--font-mono); font-size:11px; line-height:1.8; max-height:280px; overflow-y:auto; }
+        .dl-add { color:#6ee7a0; }
+        .dl-rem { color:#f87171; opacity:0.6; text-decoration:line-through; }
+        .dl-ctx { color:var(--muted); }
+        .test-row { display:flex; align-items:flex-start; gap:10px; padding:10px 12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; margin-bottom:6px; }
+        .test-icon { width:18px; height:18px; border-radius:4px; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:10px; margin-top:1px; }
+        .ti-pass { background:rgba(0,255,136,0.15); color:var(--accent); }
+        .ti-fail { background:rgba(255,59,59,0.15); color:var(--danger); }
+        .test-name { font-family:var(--font-mono); font-size:10px; color:var(--text); }
+        .test-body { font-family:var(--font-mono); font-size:9px; color:var(--muted); margin-top:3px; white-space:pre-wrap; }
+        .debt-grid { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+        .debt-box { flex:1; min-width:90px; background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:14px; text-align:center; }
+        .debt-num { font-size:22px; font-weight:800; letter-spacing:-1px; }
+        .debt-lbl { font-family:var(--font-mono); font-size:9px; color:var(--muted); margin-top:3px; letter-spacing:1px; }
+        .s-section { font-family:var(--font-mono); font-size:9px; color:var(--muted); letter-spacing:2px; text-transform:uppercase; margin:18px 0 10px; display:flex; align-items:center; gap:8px; }
+        .s-section::after { content:''; flex:1; height:1px; background:var(--border); }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <!-- ── SIDEBAR ─────────────────────────────────────────────── -->
+    <aside id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon"><i data-lucide="shield-check"></i></div>
+                <div><div class="logo-text">SafeShip</div></div>
+            </div>
+        </div>
+
+        <div class="sidebar-nav">
+            <div class="nav-item active" onclick="switchTab('url')" id="nav-url">
+                <i data-lucide="globe" style="width:15px;height:15px"></i> URL Probe
+            </div>
+            <div class="nav-item" onclick="switchTab('code')" id="nav-code">
+                <i data-lucide="file-code" style="width:15px;height:15px"></i> SAST Audit
+                <span class="nav-badge new">Multi-lang</span>
+            </div>
+            <div class="nav-item" onclick="switchTab('paste')" id="nav-paste">
+                <i data-lucide="clipboard" style="width:15px;height:15px"></i> Paste Code
+            </div>
+            <div class="nav-item" onclick="switchTab('sentinel')" id="nav-sentinel">
+                <i data-lucide="bot" style="width:15px;height:15px"></i> AI Sentinel
+                <span class="nav-badge new">New</span>
+            </div>
+        </div>
+
+        <div class="sidebar-section-title">Trace History</div>
+        <div class="history-list" id="historyContainer">
+            <div style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:10px;color:var(--muted)">NO TRACES YET</div>
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="node-card" style="margin-bottom:10px">
+                <div class="node-avatar"><i data-lucide="user" style="width:14px;height:14px;color:var(--muted)"></i></div>
+                <div>
+                    <div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase">Node ID</div>
+                    <div class="node-id" id="userIdText">Connecting...</div>
+                </div>
+            </div>
+            <div class="credit-footer">
+                <div class="credit-divider"></div>
+                <div class="credit-row">
+                    <span class="credit-copy">&copy; 2025 SafeShip</span>
+                    <a href="https://github.com/avirajsalunkhe" target="_blank" rel="noopener" class="credit-github">
+                        <i data-lucide="github" style="width:13px;height:13px"></i>
+                    </a>
+                </div>
+                <div class="credit-by">
+                    Designed &amp; Developed by<br>
+                    <a href="https://github.com/avirajsalunkhe" target="_blank" rel="noopener" class="credit-name">
+                        Aviraj Salunkhe <i data-lucide="arrow-up-right" style="width:10px;height:10px;vertical-align:middle"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ── MAIN ───────────────────────────────────────────────── -->
+    <div id="main">
+        <div id="topbar">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('url')" id="tab-url">URL Probe</button>
+                <button class="tab-btn" onclick="switchTab('code')" id="tab-code">SAST Audit</button>
+                <button class="tab-btn" onclick="switchTab('paste')" id="tab-paste">Paste Code</button>
+                <button class="tab-btn" onclick="switchTab('sentinel')" id="tab-sentinel">AI Sentinel</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+                <div class="status-pill">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span class="status-label" id="statusLabel">Standby</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="content">
+
+            <!-- URL PROBE TAB -->
+            <div id="tab-panel-url" class="tab-panel">
+                <div class="section-title">Deep <span>Live</span> Probe.</div>
+                <div class="card" style="margin-bottom:16px">
+                    <div class="input-row" style="margin-bottom:16px">
+                        <input type="text" class="text-input" id="urlInput" placeholder="https://target-endpoint.com/api/v1">
+                        <button class="btn-primary" onclick="startAudit('url')">INITIATE</button>
+                    </div>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:12px;letter-spacing:1px">SECURITY CHECKS</div>
+                    <div class="check-grid" id="urlChecks">
+                        <div class="check-chip active" data-check="xss"><span class="dot"></span>XSS Detection</div>
+                        <div class="check-chip active" data-check="sqli"><span class="dot"></span>SQL Injection</div>
+                        <div class="check-chip active" data-check="headers"><span class="dot"></span>HTTP Headers</div>
+                        <div class="check-chip active" data-check="csrf"><span class="dot"></span>CSRF Risks</div>
+                        <div class="check-chip active" data-check="ssl"><span class="dot"></span>SSL/TLS Config</div>
+                        <div class="check-chip active" data-check="cors"><span class="dot"></span>CORS Policy</div>
+                        <div class="check-chip active" data-check="auth"><span class="dot"></span>Auth Weaknesses</div>
+                        <div class="check-chip active" data-check="ratelimit"><span class="dot"></span>Rate Limiting</div>
+                        <div class="check-chip active" data-check="exposure"><span class="dot"></span>Data Exposure</div>
+                        <div class="check-chip active" data-check="dirtraversal"><span class="dot"></span>Path Traversal</div>
+                        <div class="check-chip active" data-check="ssrf"><span class="dot"></span>SSRF Vectors</div>
+                        <div class="check-chip active" data-check="idor"><span class="dot"></span>IDOR / BOLA</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SAST FILE AUDIT TAB -->
+            <div id="tab-panel-code" class="tab-panel" style="display:none">
+                <div class="section-title">Neural <span>SAST</span>.</div>
+                <div class="card" style="margin-bottom:16px">
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:10px;letter-spacing:1px">TARGET LANGUAGE</div>
+                    <div class="lang-grid" id="langGrid">
+                        <div class="lang-chip active" data-lang="auto">Auto Detect</div>
+                        <div class="lang-chip" data-lang="javascript">JavaScript</div>
+                        <div class="lang-chip" data-lang="typescript">TypeScript</div>
+                        <div class="lang-chip" data-lang="python">Python</div>
+                        <div class="lang-chip" data-lang="php">PHP</div>
+                        <div class="lang-chip" data-lang="java">Java</div>
+                        <div class="lang-chip" data-lang="csharp">C#</div>
+                        <div class="lang-chip" data-lang="go">Go</div>
+                        <div class="lang-chip" data-lang="ruby">Ruby</div>
+                        <div class="lang-chip" data-lang="rust">Rust</div>
+                        <div class="lang-chip" data-lang="kotlin">Kotlin</div>
+                        <div class="lang-chip" data-lang="swift">Swift</div>
+                        <div class="lang-chip" data-lang="cpp">C/C++</div>
+                        <div class="lang-chip" data-lang="solidity">Solidity</div>
+                        <div class="lang-chip" data-lang="shell">Shell/Bash</div>
+                        <div class="lang-chip" data-lang="sql">SQL</div>
+                    </div>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:10px;letter-spacing:1px">SAST CHECKS</div>
+                    <div class="check-grid" id="sastChecks">
+                        <div class="check-chip active" data-check="secrets"><span class="dot"></span>Hardcoded Secrets</div>
+                        <div class="check-chip active" data-check="injection"><span class="dot"></span>Injection Flaws</div>
+                        <div class="check-chip active" data-check="authz"><span class="dot"></span>Broken Auth</div>
+                        <div class="check-chip active" data-check="crypto"><span class="dot"></span>Weak Crypto</div>
+                        <div class="check-chip active" data-check="deser"><span class="dot"></span>Insecure Deser</div>
+                        <div class="check-chip active" data-check="xxe"><span class="dot"></span>XXE Injection</div>
+                        <div class="check-chip active" data-check="ssti"><span class="dot"></span>SSTI / Template</div>
+                        <div class="check-chip active" data-check="rce"><span class="dot"></span>RCE Vectors</div>
+                        <div class="check-chip active" data-check="supply"><span class="dot"></span>Supply Chain</div>
+                        <div class="check-chip active" data-check="overflow"><span class="dot"></span>Buffer Overflow</div>
+                        <div class="check-chip active" data-check="race"><span class="dot"></span>Race Conditions</div>
+                        <div class="check-chip active" data-check="logic"><span class="dot"></span>Logic Flaws</div>
+                    </div>
+                    <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragleave="this.classList.remove('drag-over')">
+                        <input type="file" id="fileInput" multiple style="display:none" onchange="handleFiles(event)">
+                        <i data-lucide="upload-cloud" class="dropzone-icon" style="width:32px;height:32px"></i>
+                        <div class="dropzone-text">Drop files or click to upload</div>
+                        <div class="dropzone-sub">JS · TS · PY · PHP · JAVA · CS · GO · RB · RS · KT · SOL · SH · SQL + more</div>
+                        <div class="file-chips" id="fileList"></div>
+                    </div>
+                    <button class="btn-primary" id="codeAuditBtn" onclick="startAudit('code')" style="margin-top:14px;width:100%" disabled>ANALYZE CODE</button>
+                </div>
+            </div>
+
+            <!-- PASTE CODE TAB -->
+            <div id="tab-panel-paste" class="tab-panel" style="display:none">
+                <div class="section-title">Paste & <span>Trace</span>.</div>
+                <div class="card" style="margin-bottom:16px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                        <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);letter-spacing:1px">LANGUAGE</div>
+                        <select id="pasteLang" class="text-input" style="width:160px;padding:5px 10px;font-size:11px">
+                            <option value="auto">Auto Detect</option>
+                            <option value="javascript">JavaScript</option>
+                            <option value="typescript">TypeScript</option>
+                            <option value="python">Python</option>
+                            <option value="php">PHP</option>
+                            <option value="java">Java</option>
+                            <option value="csharp">C#</option>
+                            <option value="go">Go</option>
+                            <option value="ruby">Ruby</option>
+                            <option value="rust">Rust</option>
+                            <option value="kotlin">Kotlin</option>
+                            <option value="shell">Shell/Bash</option>
+                            <option value="sql">SQL</option>
+                            <option value="solidity">Solidity</option>
+                        </select>
+                    </div>
+                    <textarea class="code-textarea" id="pasteInput" placeholder="// Paste your code here for instant security analysis...&#10;// Supports 14+ languages with context-aware checks"></textarea>
+                    <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+                        <button class="btn-primary" onclick="startAudit('paste')" style="flex:1">ANALYZE PASTE</button>
+                        <button class="btn-ghost" onclick="document.getElementById('pasteInput').value=''">CLEAR</button>
+                        <span style="font-family:var(--font-mono);font-size:10px;color:var(--muted)" id="pasteCharCount">0 chars</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI SENTINEL TAB -->
+            <div id="tab-panel-sentinel" class="tab-panel" style="display:none">
+                <div class="section-title">AI <span>Sentinel</span>.</div>
+                <div class="card" style="margin-bottom:16px">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+                        <div>
+                            <div style="font-family:var(--font-mono);font-size:9px;color:var(--info);letter-spacing:2px;margin-bottom:6px">① ORIGINAL PROMPT</div>
+                            <textarea class="sentinel-textarea" style="border-color:rgba(59,158,255,0.3)" id="sentinelPrompt" placeholder="What was the original prompt you gave the AI?&#10;e.g. 'Build a REST API for user authentication with JWT'"></textarea>
+                        </div>
+                        <div>
+                            <div style="font-family:var(--font-mono);font-size:9px;color:var(--warn);letter-spacing:2px;margin-bottom:6px">② AI GENERATED CODE</div>
+                            <textarea class="sentinel-textarea" id="sentinelCode" placeholder="Paste the AI-generated code here...&#10;The Sentinel will audit it across 3 tiers."></textarea>
+                        </div>
+                    </div>
+                    <div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);letter-spacing:2px;margin-bottom:10px">ANALYSIS TIERS</div>
+                    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+                        <div class="check-chip active" id="tier1-toggle"><span class="dot"></span>Tier 1: Intent Linter</div>
+                        <div class="check-chip active" id="tier2-toggle"><span class="dot"></span>Tier 2: Bloat Auditor</div>
+                        <div class="check-chip active" id="tier3-toggle"><span class="dot"></span>Tier 3: Security Sentinel</div>
+                        <div class="check-chip active" id="tests-toggle"><span class="dot"></span>Generate Unit Tests</div>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <button class="btn-primary" onclick="runSentinel()" style="flex:1">RUN SENTINEL AUDIT</button>
+                        <button class="btn-ghost" onclick="clearSentinel()">CLEAR</button>
+                        <span style="font-family:var(--font-mono);font-size:10px;color:var(--muted)" id="sentinelLineCount">0 lines</span>
+                    </div>
+                </div>
+                <div id="sentinelIdle" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:240px;border:1px dashed var(--border);border-radius:16px;gap:10px">
+                    <i data-lucide="bot" style="width:36px;height:36px;color:var(--border-bright)"></i>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);letter-spacing:2px">SENTINEL STANDING BY</div>
+                    <div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);opacity:0.6">Paste AI-generated code above to begin</div>
+                </div>
+                <div id="sentinelLoading" style="display:none;flex-direction:column;align-items:center;justify-content:center;height:240px;gap:16px">
+                    <div class="spinner"></div>
+                    <div class="loading-phase" id="sentinelPhase">INITIALIZING SENTINEL...</div>
+                    <div class="loading-steps" id="sentinelSteps"></div>
+                </div>
+                <div id="sentinelResults" style="display:none"></div>
+            </div>
+
+            <!-- RESULTS AREA -->
+            <div id="resultsArea">
+                <div id="idleState">
+                    <i data-lucide="activity" class="idle-icon" style="width:36px;height:36px"></i>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);letter-spacing:2px">AWAITING SIGNAL</div>
+                </div>
+                <div id="loadingState">
+                    <div class="spinner"></div>
+                    <div class="loading-phase" id="loadingPhase">INITIALIZING...</div>
+                    <div class="loading-steps" id="loadingSteps"></div>
+                </div>
+                <div id="contentState" style="display:none"></div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    /* ─── STATE ─────────────────────────────────────────────────────── */
+    let currentTab = 'url';
+    let activeFilter = 'all';
+    let lastResult = null;
+
+    /* ─── TAB SWITCHING ─────────────────────────────────────────────── */
+    function switchTab(tab) {
+        currentTab = tab;
+        document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+        document.getElementById('tab-panel-' + tab).style.display = 'block';
+        ['url','code','paste','sentinel'].forEach(t => {
+            document.getElementById('tab-' + t)?.classList.toggle('active', t === tab);
+            document.getElementById('nav-' + t)?.classList.toggle('active', t === tab);
+        });
+        if (tab !== 'sentinel') resetResults();
+    }
+
+    /* ─── CHECK CHIPS ───────────────────────────────────────────────── */
+    document.querySelectorAll('.check-chip').forEach(chip => {
+        chip.addEventListener('click', () => chip.classList.toggle('active'));
+    });
+
+    /* ─── LANG CHIPS ────────────────────────────────────────────────── */
+    document.querySelectorAll('#langGrid .lang-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            document.querySelectorAll('#langGrid .lang-chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+        });
+    });
+
+    /* ─── PASTE CHAR COUNT ──────────────────────────────────────────── */
+    document.getElementById('pasteInput').addEventListener('input', function() {
+        document.getElementById('pasteCharCount').textContent = this.value.length + ' chars';
+    });
+
+    /* ─── FILE HANDLING ─────────────────────────────────────────────── */
+    function handleDragOver(e) { e.preventDefault(); document.getElementById('dropzone').classList.add('drag-over'); }
+    function handleDrop(e) {
+        e.preventDefault();
+        document.getElementById('dropzone').classList.remove('drag-over');
+        processFiles(Array.from(e.dataTransfer.files));
+    }
+    function handleFiles(e) { processFiles(Array.from(e.target.files)); }
+    function processFiles(files) {
+        const list = document.getElementById('fileList'); list.innerHTML = '';
+        window.SAFESHIP_CONTEXT.currentFiles = [];
+        files.forEach(file => {
+            const r = new FileReader(); r.onload = ev => {
+                window.SAFESHIP_CONTEXT.currentFiles.push({ name: file.name, content: ev.target.result });
+                const chip = document.createElement('div'); chip.className = 'file-chip';
+                chip.innerHTML = `<i data-lucide="file-code" style="width:11px;height:11px;color:var(--accent)"></i>${file.name}`;
+                list.appendChild(chip); lucide.createIcons();
+                document.getElementById('codeAuditBtn').disabled = false;
+            }; r.readAsText(file);
+        });
+    }
+
+    /* ─── GET ACTIVE CHECKS ─────────────────────────────────────────── */
+    function getActiveChecks(containerId) {
+        return Array.from(document.querySelectorAll(`#${containerId} .check-chip.active`))
+            .map(c => c.dataset.check);
+    }
+
+    /* ─── BUILD PROMPT ──────────────────────────────────────────────── */
+    function buildPrompt(mode) {
+        const checks = mode === 'url' ? getActiveChecks('urlChecks') : getActiveChecks('sastChecks');
+        const checksStr = checks.join(', ');
+        const schema = `Respond ONLY with a valid JSON object exactly matching this schema:
+{
+  "score": <integer 0-100>,
+  "grade": <"A"|"B"|"C"|"D"|"F">,
+  "summary": <string, 2-3 sentences>,
+  "language": <detected language string>,
+  "stats": { "critical": <int>, "high": <int>, "medium": <int>, "low": <int>, "info": <int> },
+  "findings": [
+    {
+      "title": <string>,
+      "severity": <"critical"|"high"|"medium"|"low"|"info">,
+      "category": <string>,
+      "description": <string>,
+      "location": <string, file/line/function if known>,
+      "impact": <string, what an attacker can do>,
+      "fix": <string, concrete code fix or steps>,
+      "cwe": <string, e.g. "CWE-79">
+    }
+  ]
+}`;
+
+        if (mode === 'url') {
+            const url = document.getElementById('urlInput').value.trim();
+            return `You are a professional web security auditor. Perform a comprehensive security analysis of this URL: ${url}\n\nFocus on these specific checks: ${checksStr}\n\nFor each issue found, provide: what it is, where it likely exists, the security impact, a concrete fix with example code, and the relevant CWE identifier.\nBe thorough and realistic — analyze headers, authentication, input handling, API design, CORS, SSL/TLS, rate limiting, and all specified checks.\n\n${schema}`;
+        }
+
+        const lang = mode === 'paste'
+            ? (document.getElementById('pasteLang')?.value || 'auto')
+            : (document.querySelector('#langGrid .lang-chip.active')?.dataset.lang || 'auto');
+
+        const code = mode === 'paste'
+            ? document.getElementById('pasteInput').value
+            : window.SAFESHIP_CONTEXT.currentFiles.map(f => `// FILE: ${f.name}\n${f.content}`).join('\n\n---\n\n');
+
+        return `You are an expert SAST (Static Application Security Testing) engine. Perform a deep security audit of the following ${lang !== 'auto' ? lang : 'code (auto-detect language)'}.\n\nFocus on these vulnerability categories: ${checksStr}\n\nLanguage context: ${lang !== 'auto' ? `This is ${lang} code` : 'Auto-detect the language and apply language-specific security checks'}\n\nApply language-specific security knowledge:\n- For JavaScript/TypeScript: prototype pollution, eval(), DOM XSS, unsafe npm packages patterns\n- For Python: pickle deserialization, eval/exec, SQL string formatting, os.system calls\n- For PHP: file inclusion, extract(), type juggling, unsafe deserialization\n- For Java: JNDI injection, Java deserialization, XXE, reflection misuse\n- For Go: race conditions, unsafe pointer usage, integer overflow\n- For Solidity: reentrancy, integer overflow/underflow, front-running, tx.origin auth\n- For SQL: injection patterns, excessive permissions, data exposure\n- For Shell: command injection, unquoted variables, wildcard injection\n\nFor each finding: exact location (file, line number, function name), precise impact, and a concrete fix with corrected code example.\n\nCODE TO AUDIT:\n\`\`\`\n${code}\n\`\`\`\n\n${schema}`;
+    }
+
+    /* ─── LOADING STEPS ─────────────────────────────────────────────── */
+    const LOADING_STEPS = {
+        url:   ['Resolving target endpoint', 'Analyzing HTTP surface', 'Running security checks', 'Compiling findings'],
+        code:  ['Parsing file structure', 'Detecting language patterns', 'Running SAST engine', 'Generating report'],
+        paste: ['Parsing code structure', 'Detecting language', 'Analyzing vulnerabilities', 'Compiling findings']
+    };
+
+    function showLoading(mode) {
+        document.getElementById('idleState').style.display = 'none';
+        document.getElementById('contentState').style.display = 'none';
+        const ld = document.getElementById('loadingState'); ld.style.display = 'flex';
+        const steps = document.getElementById('loadingSteps');
+        steps.innerHTML = LOADING_STEPS[mode].map((s, i) =>
+            `<div class="loading-step" id="lstep-${i}"><span class="step-dot"></span>${s}</div>`).join('');
+        let i = 0;
+        const advance = () => {
+            if (i > 0) document.getElementById(`lstep-${i-1}`)?.classList.replace('active','done');
+            if (i < LOADING_STEPS[mode].length) {
+                document.getElementById(`lstep-${i}`)?.classList.add('active');
+                document.getElementById('loadingPhase').textContent = LOADING_STEPS[mode][i].toUpperCase() + '...';
+                i++;
+                return setTimeout(advance, 900 + Math.random() * 600);
+            }
+        };
+        return advance();
+    }
+
+    /* ─── START AUDIT ───────────────────────────────────────────────── */
+    // ✅ FIXED: removed old sessionKeys check — Worker handles all keys now
+    async function startAudit(mode) {
+        const workerUrl = window.WORKER_URL;
+        if (!workerUrl || workerUrl === '__WORKER_URL__') {
+            alert('Server not configured. Check WORKER_URL in GitHub Secrets and redeploy.');
+            return;
+        }
+        if (mode === 'paste' && !document.getElementById('pasteInput').value.trim()) {
+            alert('Please paste some code first.'); return;
+        }
+        if (mode === 'url' && !document.getElementById('urlInput').value.trim()) {
+            alert('Please enter a URL.'); return;
+        }
+
+        const timer = showLoading(mode);
+        try {
+            const prompt = buildPrompt(mode);
+            const data = await window.callNeuralNode(prompt);
+            clearTimeout(timer);
+
+            data.target = mode === 'url'
+                ? document.getElementById('urlInput').value.trim()
+                : mode === 'paste' ? 'Pasted Code Snippet'
+                : window.SAFESHIP_CONTEXT.currentFiles.map(f => f.name).join(', ');
+
+            lastResult = data;
+            await window.saveAuditToCloud(data);
+            renderResults(data);
+        } catch (err) {
+            clearTimeout(timer);
+            window.neuralTelemetry?.('Error', err.message);
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('idleState').style.display = 'flex';
+            alert('Audit failed: ' + err.message);
+        }
+    }
+
+    /* ─── RENDER RESULTS ────────────────────────────────────────────── */
+    function getScoreColor(score) {
+        if (score >= 80) return '#00ff88';
+        if (score >= 60) return '#ffb800';
+        if (score >= 40) return '#ff7b3b';
+        return '#ff3b3b';
+    }
+
+    function severityClass(sev) {
+        const s = (sev || '').toLowerCase();
+        return { critical:'severity-critical badge-critical', high:'severity-high badge-high', medium:'severity-medium badge-medium', low:'severity-low badge-low', info:'severity-info badge-info' }[s] || 'severity-info badge-info';
+    }
+
+    function renderResults(d, filter = 'all') {
+        document.getElementById('loadingState').style.display = 'none';
+        document.getElementById('idleState').style.display = 'none';
+        const ct = document.getElementById('contentState');
+        ct.style.display = 'block';
+        lastResult = d;
+
+        const score = d.score || 0;
+        const color = getScoreColor(score);
+        const circumference = 2 * Math.PI * 44;
+        const dash = circumference * (score / 100);
+        const stats = d.stats || { critical:0, high:0, medium:0, low:0, info:0 };
+        const findings = d.findings || [];
+        const filtered = filter === 'all' ? findings : findings.filter(f => (f.severity||'').toLowerCase() === filter);
+
+        ct.innerHTML = `
+        <div class="card fade-in">
+            <div class="score-header">
+                <div class="score-ring-wrap">
+                    <svg viewBox="0 0 100 100" width="100" height="100">
+                        <circle cx="50" cy="50" r="44" fill="none" stroke="var(--border)" stroke-width="6"/>
+                        <circle cx="50" cy="50" r="44" fill="none" stroke="${color}" stroke-width="6"
+                            stroke-dasharray="${dash} ${circumference}" stroke-linecap="round"
+                            style="transition:stroke-dasharray 1s ease"/>
+                    </svg>
+                    <div class="score-number">
+                        <div class="score-num" style="color:${color}">${score}</div>
+                        <div class="score-pct">/ 100</div>
+                    </div>
+                </div>
+                <div class="score-meta">
+                    <div class="score-label">Security Score</div>
+                    <div class="score-grade" style="color:${color}">${d.grade || '—'} ${getGradeLabel(d.grade)}</div>
+                    <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-top:4px">${d.language || ''}</div>
+                    <div class="score-summary" style="margin-top:8px">${d.summary || ''}</div>
+                    <div style="margin-top:12px;display:flex;gap:8px">
+                        <button class="btn-ghost" onclick="resetResults()" style="font-size:10px;padding:6px 12px">↩ New Audit</button>
+                        <button class="btn-ghost" onclick="exportJSON()" style="font-size:10px;padding:6px 12px">↓ JSON</button>
+                        <button class="btn-ghost" onclick="exportMarkdown()" style="font-size:10px;padding:6px 12px">↓ MD Report</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats-row">
+                <div class="stat-box" style="border-color:rgba(255,59,59,0.3)"><div class="stat-num" style="color:var(--danger)">${stats.critical||0}</div><div class="stat-lbl">Critical</div></div>
+                <div class="stat-box" style="border-color:rgba(255,123,59,0.3)"><div class="stat-num" style="color:#ff7b3b">${stats.high||0}</div><div class="stat-lbl">High</div></div>
+                <div class="stat-box" style="border-color:rgba(255,184,0,0.3)"><div class="stat-num" style="color:var(--warn)">${stats.medium||0}</div><div class="stat-lbl">Medium</div></div>
+                <div class="stat-box" style="border-color:rgba(59,158,255,0.3)"><div class="stat-num" style="color:var(--info)">${stats.low||0}</div><div class="stat-lbl">Low</div></div>
+                <div class="stat-box"><div class="stat-num" style="color:var(--muted)">${stats.info||0}</div><div class="stat-lbl">Info</div></div>
+                <div class="stat-box" style="border-color:var(--accent-border)"><div class="stat-num" style="color:var(--accent)">${findings.length}</div><div class="stat-lbl">Total</div></div>
+            </div>
+
+            <div class="filter-bar">
+                ${['all','critical','high','medium','low','info'].map(f =>
+                    `<button class="filter-btn ${activeFilter===f?'active':''}" onclick="applyFilter('${f}')">${f.toUpperCase()}</button>`).join('')}
+                <span class="filter-count">${filtered.length} FINDINGS</span>
+            </div>
+
+            <div id="findingsList">
+                ${filtered.length === 0
+                    ? `<div style="text-align:center;padding:32px;font-family:var(--font-mono);font-size:11px;color:var(--muted)">NO FINDINGS FOR THIS FILTER</div>`
+                    : filtered.map((f, i) => {
+                        const sClasses = severityClass(f.severity);
+                        const cardClass = sClasses.split(' ')[0];
+                        const badgeClass = sClasses.split(' ')[1];
+                        return `
+                        <div class="finding-card ${cardClass}" id="finding-${i}">
+                            <div class="finding-header" onclick="toggleFinding(${i})">
+                                <div>
+                                    <div class="finding-title">${f.title}</div>
+                                    ${f.cwe ? `<div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);margin-top:3px">${f.cwe} · ${f.category||''}</div>` : ''}
+                                </div>
+                                <div style="display:flex;align-items:center;gap:8px">
+                                    <span class="severity-badge ${badgeClass}">${(f.severity||'info').toUpperCase()}</span>
+                                    <i data-lucide="chevron-down" class="finding-toggle" style="width:14px;height:14px"></i>
+                                </div>
+                            </div>
+                            <div class="finding-body">
+                                <div class="finding-location"><i data-lucide="map-pin" style="width:10px;height:10px;display:inline;vertical-align:middle;margin-right:4px"></i>${f.location || 'Location unknown'}</div>
+                                <div class="finding-desc">${f.description}</div>
+                                ${f.impact ? `<div style="background:rgba(255,59,59,0.06);border:1px solid rgba(255,59,59,0.15);border-radius:8px;padding:10px;margin-bottom:12px">
+                                    <div style="font-family:var(--font-mono);font-size:9px;color:var(--danger);letter-spacing:1px;margin-bottom:4px">⚡ IMPACT</div>
+                                    <div style="font-size:12px;color:var(--muted)">${f.impact}</div>
+                                </div>` : ''}
+                                <div class="finding-fix">
+                                    <div class="fix-label">✦ Recommended Fix</div>
+                                    <pre class="fix-code">${f.fix}</pre>
+                                </div>
+                            </div>
+                        </div>`;
+                    }).join('')}
+            </div>
+        </div>`;
+        lucide.createIcons();
+    }
+
+    function getGradeLabel(g) {
+        return { A:'Excellent', B:'Good', C:'Fair', D:'Poor', F:'Critical' }[g] || '';
+    }
+    function applyFilter(f) { activeFilter = f; if (lastResult) renderResults(lastResult, f); }
+    function toggleFinding(i) { document.getElementById('finding-'+i)?.classList.toggle('expanded'); lucide.createIcons(); }
+
+    /* ─── EXPORT ────────────────────────────────────────────────────── */
+    function exportJSON() {
+        if (!lastResult) return;
+        const blob = new Blob([JSON.stringify(lastResult, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `safeship-audit-${Date.now()}.json`; a.click();
+    }
+    function exportMarkdown() {
+        if (!lastResult) return;
+        const d = lastResult;
+        let md = `# SafeShip Security Report\n\n**Score:** ${d.score}/100 (${d.grade})\n**Target:** ${d.target}\n**Language:** ${d.language||'N/A'}\n\n## Summary\n${d.summary}\n\n## Findings (${(d.findings||[]).length})\n\n`;
+        (d.findings||[]).forEach((f,i) => {
+            md += `### ${i+1}. ${f.title} [${(f.severity||'').toUpperCase()}]\n`;
+            if (f.cwe) md += `**CWE:** ${f.cwe}  \n`;
+            md += `**Location:** ${f.location}  \n**Category:** ${f.category}  \n\n${f.description}\n\n`;
+            if (f.impact) md += `**Impact:** ${f.impact}\n\n`;
+            md += `**Fix:**\n\`\`\`\n${f.fix}\n\`\`\`\n\n---\n\n`;
+        });
+        const blob = new Blob([md], { type: 'text/markdown' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `safeship-report-${Date.now()}.md`; a.click();
+    }
+
+    /* ─── RESET ─────────────────────────────────────────────────────── */
+    function resetResults() {
+        document.getElementById('idleState').style.display = 'flex';
+        document.getElementById('loadingState').style.display = 'none';
+        document.getElementById('contentState').style.display = 'none';
+        activeFilter = 'all'; lastResult = null;
+    }
+
+    /* ─── AI SENTINEL ───────────────────────────────────────────────── */
+    document.getElementById('sentinelCode').addEventListener('input', function() {
+        const lines = this.value.split('\n').length;
+        document.getElementById('sentinelLineCount').textContent = lines + ' lines';
+    });
+    document.querySelectorAll('#tier1-toggle,#tier2-toggle,#tier3-toggle,#tests-toggle').forEach(el => {
+        el.addEventListener('click', () => el.classList.toggle('active'));
+    });
+
+    function clearSentinel() {
+        document.getElementById('sentinelPrompt').value = '';
+        document.getElementById('sentinelCode').value = '';
+        document.getElementById('sentinelLineCount').textContent = '0 lines';
+        document.getElementById('sentinelIdle').style.display = 'flex';
+        document.getElementById('sentinelLoading').style.display = 'none';
+        document.getElementById('sentinelResults').style.display = 'none';
+    }
+
+    const SENTINEL_STEPS = ['Parsing code structure','Running Intent Linter','Auditing for bloat','Threat modelling','Generating tests','Compiling report'];
+
+    function showSentinelLoading() {
+        document.getElementById('sentinelIdle').style.display = 'none';
+        document.getElementById('sentinelResults').style.display = 'none';
+        const ld = document.getElementById('sentinelLoading'); ld.style.display = 'flex';
+        const steps = document.getElementById('sentinelSteps');
+        steps.innerHTML = SENTINEL_STEPS.map((s,i) =>
+            `<div class="loading-step" id="sstep-${i}"><span class="step-dot"></span>${s}</div>`).join('');
+        let i = 0;
+        const advance = () => {
+            if (i > 0) document.getElementById(`sstep-${i-1}`)?.classList.replace('active','done');
+            if (i < SENTINEL_STEPS.length) {
+                document.getElementById(`sstep-${i}`)?.classList.add('active');
+                document.getElementById('sentinelPhase').textContent = SENTINEL_STEPS[i].toUpperCase() + '...';
+                i++; return setTimeout(advance, 700 + Math.random()*500);
+            }
+        };
+        return advance();
+    }
+
+    async function runSentinel() {
+        const prompt = document.getElementById('sentinelPrompt').value.trim();
+        const code   = document.getElementById('sentinelCode').value.trim();
+        if (!code) { alert('Please paste AI-generated code first.'); return; }
+
+        const workerUrl = window.WORKER_URL;
+        if (!workerUrl || workerUrl === '__WORKER_URL__') {
+            alert('Server not configured. Check WORKER_URL.'); return;
+        }
+
+        const tiers = {
+            t1: document.getElementById('tier1-toggle').classList.contains('active'),
+            t2: document.getElementById('tier2-toggle').classList.contains('active'),
+            t3: document.getElementById('tier3-toggle').classList.contains('active'),
+            tests: document.getElementById('tests-toggle').classList.contains('active'),
+        };
+
+        const timer = showSentinelLoading();
+        try {
+            const sentinelPrompt = buildSentinelPrompt(prompt, code, tiers);
+            const data = await window.callNeuralNode(sentinelPrompt);
+            clearTimeout(timer);
+            renderSentinelResults(data, code);
+        } catch(err) {
+            clearTimeout(timer);
+            document.getElementById('sentinelLoading').style.display = 'none';
+            document.getElementById('sentinelIdle').style.display = 'flex';
+            alert('Sentinel failed: ' + err.message);
+        }
+    }
+
+    function buildSentinelPrompt(originalPrompt, code, tiers) {
+        const totalLines = code.split('\n').length;
+        return `You are an "AI Sentinel" — a Senior Engineer AI that reviews AI-generated code for bloat, intent drift, and security issues.
+
+ORIGINAL PROMPT GIVEN TO AI:
+${originalPrompt || '(not provided — infer intent from the code)'}
+
+AI-GENERATED CODE (${totalLines} lines):
+\`\`\`
+${code}
+\`\`\`
+
+Perform ALL of the following analysis tiers and respond ONLY with a valid JSON object matching this EXACT schema:
+{
+  "summary": "2-3 sentence executive summary of code quality",
+  "totalLines": ${totalLines},
+  "effectiveLines": <int, lines that actually matter>,
+  "bloatPercent": <int 0-100, percentage of unnecessary code>,
+  "coverageEstimate": <int 0-100, estimated test coverage of generated code>,
+  "debtScore": <int 0-100, 0=clean 100=disaster>,
+  "aiHumanRatio": <string e.g. "87% AI / 13% Human-equivalent">,
+
+  ${tiers.t1 ? `"tier1": {
+    "passed": <bool>,
+    "intentMatch": <int 0-100, how well code matches original prompt>,
+    "issues": [{"title": <string>, "detail": <string>, "fix": <string>}],
+    "hallucinations": [<string, any hallucinated libraries or deprecated patterns>]
+  },` : '"tier1": null,'}
+
+  ${tiers.t2 ? `"tier2": {
+    "bloatBreakdown": {
+      "boilerplate": <int, lines>,
+      "redundantLogic": <int, lines>,
+      "unusedImports": <int, lines>,
+      "effectiveCode": <int, lines>
+    },
+    "refactoredDiff": [
+      {"type": <"add"|"remove"|"context">, "line": <string>}
+    ],
+    "refactorSummary": <string, what was changed and why>
+  },` : '"tier2": null,'}
+
+  ${tiers.t3 ? `"tier3": {
+    "threatScore": <int 0-100, 100=critical>,
+    "vectors": [
+      {"type": <string e.g. "SQLi"|"XSS"|"IDOR">, "severity": <"critical"|"high"|"medium"|"low">, "location": <string>, "detail": <string>, "fix": <string>}
+    ]
+  },` : '"tier3": null,'}
+
+  ${tiers.tests ? `"tests": [
+    {"name": <string, test function name>, "passes": <bool>, "code": <string, actual test code>, "covers": <string, what it tests>}
+  ]` : '"tests": null'}
+}`;
+    }
+
+    function renderSentinelResults(d, originalCode) {
+        document.getElementById('sentinelLoading').style.display = 'none';
+        const el = document.getElementById('sentinelResults');
+        el.style.display = 'block';
+
+        const bloat = d.bloatPercent || 0;
+        const bloatColor = bloat > 60 ? 'var(--danger)' : bloat > 35 ? 'var(--warn)' : 'var(--accent)';
+        const debtColor  = (d.debtScore||0) > 60 ? 'var(--danger)' : (d.debtScore||0) > 35 ? 'var(--warn)' : 'var(--accent)';
+        const coverage   = d.coverageEstimate || 0;
+        const coverageC  = coverage >= 80 ? 'var(--accent)' : coverage >= 50 ? 'var(--warn)' : 'var(--danger)';
+        const circ = 2 * Math.PI * 28;
+        const dash = circ * (coverage / 100);
+
+        el.innerHTML = `
+        <div class="card fade-in">
+            <!-- Dashboard header -->
+            <div style="display:flex;align-items:flex-start;gap:20px;margin-bottom:20px;flex-wrap:wrap">
+                <div style="flex:1;min-width:200px">
+                    <div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);letter-spacing:2px;margin-bottom:6px">SENTINEL VERDICT</div>
+                    <div style="font-size:13px;color:var(--muted);line-height:1.6">${d.summary || ''}</div>
+                    <div style="margin-top:12px;display:flex;gap:8px">
+                        <button class="btn-ghost" onclick="clearSentinel()" style="font-size:10px;padding:6px 12px">↩ New Analysis</button>
+                        <button class="btn-ghost" onclick="exportSentinelJSON()" style="font-size:10px;padding:6px 12px">↓ Export JSON</button>
+                    </div>
+                </div>
+                <!-- Coverage ring -->
+                <div style="text-align:center">
+                    <div style="position:relative;width:72px;height:72px;margin:0 auto 4px">
+                        <svg viewBox="0 0 64 64" width="72" height="72" style="position:absolute;inset:0;transform:rotate(-90deg)">
+                            <circle cx="32" cy="32" r="28" fill="none" stroke="var(--border)" stroke-width="5"/>
+                            <circle cx="32" cy="32" r="28" fill="none" stroke="${coverageC}" stroke-width="5"
+                                stroke-dasharray="${dash} ${circ}" stroke-linecap="round"/>
+                        </svg>
+                        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:${coverageC}">${coverage}%</div>
+                    </div>
+                    <div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);letter-spacing:1px">COVERAGE</div>
+                </div>
+            </div>
+
+            <!-- Debt dashboard -->
+            <div class="debt-grid">
+                <div class="debt-box">
+                    <div class="debt-num" style="color:${bloatColor}">${bloat}%</div>
+                    <div class="debt-lbl">Bloat</div>
+                </div>
+                <div class="debt-box">
+                    <div class="debt-num" style="color:var(--accent)">${d.effectiveLines || '—'}</div>
+                    <div class="debt-lbl">Effective Lines</div>
+                </div>
+                <div class="debt-box">
+                    <div class="debt-num" style="color:var(--muted)">${d.totalLines || '—'}</div>
+                    <div class="debt-lbl">Total Lines</div>
+                </div>
+                <div class="debt-box">
+                    <div class="debt-num" style="color:${debtColor}">${d.debtScore || 0}</div>
+                    <div class="debt-lbl">Debt Score</div>
+                </div>
+                <div class="debt-box" style="min-width:140px">
+                    <div style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--warn)">${d.aiHumanRatio || '—'}</div>
+                    <div class="debt-lbl">AI/Human Ratio</div>
+                </div>
+            </div>
+
+            ${d.tier1 ? `
+            <!-- TIER 1: Intent Linter -->
+            <div class="s-section">Tier 1 <span style="color:var(--info)">Intent Linter</span></div>
+            <div class="s-tier" style="border-left:3px solid var(--info)">
+                <div class="s-tier-head">
+                    <span class="tier-pill t1">TIER 1</span>
+                    <span style="font-size:13px;font-weight:700">Intent Linter</span>
+                    <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;font-weight:700;color:${(d.tier1.intentMatch||0)>=70?'var(--accent)':'var(--warn)'}">
+                        ${d.tier1.intentMatch || 0}% match
+                    </span>
+                    <span style="font-family:var(--font-mono);font-size:10px;color:${d.tier1.passed?'var(--accent)':'var(--danger)'}">
+                        ${d.tier1.passed ? '✓ PASS' : '✗ FAIL'}
+                    </span>
+                </div>
+                <div class="s-tier-body">
+                    <div class="bar-wrap">
+                        <div class="bar-lbl"><span>Intent Match</span><span>${d.tier1.intentMatch||0}%</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width:${d.tier1.intentMatch||0}%;background:var(--info)"></div></div>
+                    </div>
+                    ${d.tier1.hallucinations?.length ? `
+                    <div style="margin-bottom:12px">
+                        <div style="font-family:var(--font-mono);font-size:9px;color:var(--warn);letter-spacing:1px;margin-bottom:6px">⚠ HALLUCINATED / DEPRECATED</div>
+                        ${d.tier1.hallucinations.map(h => `<div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);padding:4px 0;border-bottom:1px solid var(--border)">→ ${h}</div>`).join('')}
+                    </div>` : ''}
+                    ${(d.tier1.issues||[]).map(iss => `
+                    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px">
+                        <div style="font-size:12px;font-weight:700;margin-bottom:4px">${iss.title}</div>
+                        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${iss.detail}</div>
+                        <div style="font-family:var(--font-mono);font-size:10px;color:var(--accent)">✦ ${iss.fix}</div>
+                    </div>`).join('')}
+                </div>
+            </div>` : ''}
+
+            ${d.tier2 ? `
+            <!-- TIER 2: Bloat Auditor -->
+            <div class="s-section">Tier 2 <span style="color:var(--warn)">Bloat Auditor</span></div>
+            <div class="s-tier" style="border-left:3px solid var(--warn)">
+                <div class="s-tier-head">
+                    <span class="tier-pill t2">TIER 2</span>
+                    <span style="font-size:13px;font-weight:700">Bloat Auditor</span>
+                    <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;font-weight:700;color:${bloatColor}">${bloat}% bloat detected</span>
+                </div>
+                <div class="s-tier-body">
+                    ${d.tier2.bloatBreakdown ? `
+                    <div class="bar-wrap">
+                        <div class="bar-lbl"><span>Boilerplate</span><span>${d.tier2.bloatBreakdown.boilerplate||0} lines</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width:${Math.min(100,((d.tier2.bloatBreakdown.boilerplate||0)/d.totalLines)*100)}%;background:var(--danger)"></div></div>
+                    </div>
+                    <div class="bar-wrap">
+                        <div class="bar-lbl"><span>Redundant Logic</span><span>${d.tier2.bloatBreakdown.redundantLogic||0} lines</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width:${Math.min(100,((d.tier2.bloatBreakdown.redundantLogic||0)/d.totalLines)*100)}%;background:var(--warn)"></div></div>
+                    </div>
+                    <div class="bar-wrap">
+                        <div class="bar-lbl"><span>Unused Imports</span><span>${d.tier2.bloatBreakdown.unusedImports||0} lines</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width:${Math.min(100,((d.tier2.bloatBreakdown.unusedImports||0)/d.totalLines)*100)}%;background:var(--info)"></div></div>
+                    </div>
+                    <div class="bar-wrap">
+                        <div class="bar-lbl"><span>Effective Code</span><span>${d.tier2.bloatBreakdown.effectiveCode||0} lines</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width:${Math.min(100,((d.tier2.bloatBreakdown.effectiveCode||0)/d.totalLines)*100)}%;background:var(--accent)"></div></div>
+                    </div>` : ''}
+                    ${d.tier2.refactorSummary ? `<div style="font-size:12px;color:var(--muted);margin-top:8px;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">${d.tier2.refactorSummary}</div>` : ''}
+                    ${d.tier2.refactoredDiff?.length ? `
+                    <div class="diff-wrap">
+                        <div class="diff-head">
+                            <span style="font-family:var(--font-mono);font-size:10px;color:var(--accent);letter-spacing:1px">REFACTORED DIFF</span>
+                            <span style="font-family:var(--font-mono);font-size:9px;color:var(--muted)">${d.tier2.refactoredDiff.filter(l=>l.type==='add').length} additions · ${d.tier2.refactoredDiff.filter(l=>l.type==='remove').length} removals</span>
+                        </div>
+                        <div class="diff-body">
+                            ${d.tier2.refactoredDiff.map(l => `
+                            <div class="dl-${l.type==='add'?'add':l.type==='remove'?'rem':'ctx'}">
+                                <span style="opacity:0.5;margin-right:8px">${l.type==='add'?'+':l.type==='remove'?'-':' '}</span>${escHtml(l.line||'')}
+                            </div>`).join('')}
+                        </div>
+                    </div>` : ''}
+                </div>
+            </div>` : ''}
+
+            ${d.tier3 ? `
+            <!-- TIER 3: Security Sentinel -->
+            <div class="s-section">Tier 3 <span style="color:var(--danger)">Security Sentinel</span></div>
+            <div class="s-tier" style="border-left:3px solid var(--danger)">
+                <div class="s-tier-head">
+                    <span class="tier-pill t3">TIER 3</span>
+                    <span style="font-size:13px;font-weight:700">Security Sentinel</span>
+                    <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;font-weight:700;color:${(d.tier3.threatScore||0)>60?'var(--danger)':(d.tier3.threatScore||0)>30?'var(--warn)':'var(--accent)'}">
+                        Threat Score: ${d.tier3.threatScore||0}/100
+                    </span>
+                </div>
+                <div class="s-tier-body">
+                    ${(d.tier3.vectors||[]).length === 0
+                        ? `<div style="font-family:var(--font-mono);font-size:11px;color:var(--accent);text-align:center;padding:16px">✓ No threat vectors detected</div>`
+                        : (d.tier3.vectors||[]).map(v => {
+                            const vc = {critical:'var(--danger)',high:'#ff7b3b',medium:'var(--warn)',low:'var(--info)'}[v.severity]||'var(--muted)';
+                            return `
+                            <div style="background:var(--bg);border:1px solid var(--border);border-left:3px solid ${vc};border-radius:8px;padding:12px;margin-bottom:8px">
+                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                                    <span style="font-family:var(--font-mono);font-size:9px;background:rgba(255,59,59,0.1);color:${vc};padding:2px 8px;border-radius:4px;font-weight:700">${(v.severity||'').toUpperCase()}</span>
+                                    <span style="font-size:12px;font-weight:700">${v.type}</span>
+                                </div>
+                                <div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);margin-bottom:6px">${v.location||''}</div>
+                                <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${v.detail}</div>
+                                <div style="font-family:var(--font-mono);font-size:10px;color:var(--accent)">✦ ${v.fix}</div>
+                            </div>`;
+                        }).join('')}
+                </div>
+            </div>` : ''}
+
+            ${d.tests?.length ? `
+            <!-- Unit Tests -->
+            <div class="s-section">Generated <span style="color:var(--accent)">Unit Tests</span></div>
+            <div class="s-tier" style="border-left:3px solid var(--accent)">
+                <div class="s-tier-head">
+                    <span class="tier-pill t4">TESTS</span>
+                    <span style="font-size:13px;font-weight:700">Auto-Generated Unit Tests</span>
+                    <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--accent)">${d.tests.length} tests · ${coverage}% coverage</span>
+                </div>
+                <div class="s-tier-body">
+                    ${d.tests.map(t => `
+                    <div class="test-row">
+                        <div class="test-icon ${t.passes?'ti-pass':'ti-fail'}">${t.passes?'✓':'✗'}</div>
+                        <div style="flex:1">
+                            <div class="test-name">${t.name}</div>
+                            <div class="test-body">${escHtml(t.code||'')}
+<span style="color:var(--muted);font-size:9px">// covers: ${t.covers||''}</span></div>
+                        </div>
+                    </div>`).join('')}
+                </div>
+            </div>` : ''}
+        </div>`;
+
+        window._lastSentinelResult = d;
+        lucide.createIcons();
+    }
+
+    function escHtml(s) {
+        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function exportSentinelJSON() {
+        if (!window._lastSentinelResult) return;
+        const blob = new Blob([JSON.stringify(window._lastSentinelResult, null, 2)], { type:'application/json' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = `sentinel-report-${Date.now()}.json`; a.click();
+    }
+    function renderHistory() {
+        const h = window.SAFESHIP_CONTEXT?.history || [];
+        const c = document.getElementById('historyContainer');
+        if (!h.length) { c.innerHTML = '<div style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:10px;color:var(--muted)">NO TRACES YET</div>'; return; }
+        c.innerHTML = h.map(i => {
+            const color = getScoreColor(i.score || 0);
+            return `<div class="history-item">
+                <div onclick='renderResults(${JSON.stringify(i).replace(/'/g,"&apos;")})'>
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <span class="history-score" style="color:${color}">${i.score||0}/100</span>
+                        <span class="history-date">${i.timestamp ? new Date(i.timestamp.seconds*1000).toLocaleDateString() : '—'}</span>
+                    </div>
+                    <div class="history-target">${i.target||'Unknown'}</div>
+                </div>
+                <button class="history-delete" onclick="deleteAudit('${i.id}')" data-tip="Delete">
+                    <i data-lucide="trash-2" style="width:12px;height:12px"></i>
+                </button>
+            </div>`;
+        }).join('');
+        lucide.createIcons();
+    }
+</script>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    window.neuralTelemetry = (c, m, d=null) =>
+        console.log(`%c[NEURAL][${c}]%c ${m}`, 'color:#00ff88;font-weight:bold', 'color:#5a6060', d||'');
+
+    /* ── Init context — no keys stored here ── */
+    const appId = 'safeship-trace-v7';
+    window.SAFESHIP_CONTEXT = { db: null, auth: null, appId, user: null, history: [], currentFiles: [] };
+
+    /* ── Status helpers ── */
+    function setStatus(label, state) {
+        document.getElementById('statusLabel').textContent = label;
+        const dot = document.getElementById('statusDot');
+        dot.className = 'status-dot' + (state==='active' ? ' active' : state==='warn' ? ' warn' : state==='error' ? ' error' : '');
+    }
+
+    /* ── Validate Worker URL ── */
+    const workerUrl = (window.WORKER_URL || '').replace(/\/$/, '');
+    if (!workerUrl || workerUrl === '__WORKER_URL__') {
+        neuralTelemetry('Engine', 'CRITICAL: WORKER_URL not injected — check GitHub Secrets');
+        setStatus('No Server', 'error');
+    } else {
+        neuralTelemetry('Engine', 'Neural proxy → ' + workerUrl);
+    }
+
+    /* ── Firebase init ── */
+    const config = (window.INJECTED_FIREBASE && typeof window.INJECTED_FIREBASE === 'object' && window.INJECTED_FIREBASE.apiKey)
+        ? window.INJECTED_FIREBASE : null;
+
+    if (config) {
+        try {
+            const app = initializeApp(config);
+            const auth = getAuth(app);
+            const db   = getFirestore(app);
+            window.SAFESHIP_CONTEXT.auth = auth;
+            window.SAFESHIP_CONTEXT.db   = db;
+            onAuthStateChanged(auth, user => {
+                window.SAFESHIP_CONTEXT.user = user;
+                const el = document.getElementById('userIdText');
+                if (el) el.textContent = user ? user.uid.slice(0,20)+'...' : 'Connecting...';
+                if (user) { setStatus('Cloud Linked', 'active'); loadHistory(user.uid); }
+            });
+            setStatus('Connecting', '');
+            await signInAnonymously(auth);
+            neuralTelemetry('Firebase', 'Uplink established');
+        } catch (e) {
+            neuralTelemetry('Firebase', 'Init error', e);
+            setStatus('DB Offline', 'error');
+        }
+    } else {
+        neuralTelemetry('Firebase', 'Standalone mode — no history persistence');
+        document.getElementById('userIdText').textContent = 'Standalone';
+        if (workerUrl && workerUrl !== '__WORKER_URL__') setStatus('Neural Active', 'active');
+    }
+
+    /* ── Firestore history ── */
+    function loadHistory(userId) {
+        const { db, appId } = window.SAFESHIP_CONTEXT;
+        if (!db) return;
+        onSnapshot(
+            collection(db, 'artifacts', appId, 'users', userId, 'audits'),
+            snap => {
+                window.SAFESHIP_CONTEXT.history = snap.docs
+                    .map(d => ({ id: d.id, ...d.data() }))
+                    .sort((a, b) => (b.timestamp?.seconds||0) - (a.timestamp?.seconds||0));
+                renderHistory();
+            },
+            err => neuralTelemetry('History', 'Access error', err)
+        );
+    }
+
+    window.saveAuditToCloud = async data => {
+        const { db, user, appId } = window.SAFESHIP_CONTEXT;
+        if (!db || !user) return;
+        try { await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'audits'), { ...data, timestamp: serverTimestamp() }); }
+        catch(e) { neuralTelemetry('Storage', 'Write error', e); }
+    };
+
+    window.deleteAudit = async id => {
+        const { db, user, appId } = window.SAFESHIP_CONTEXT;
+        if (!db || !user) return;
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'audits', id)); }
+        catch(e) { neuralTelemetry('Storage', 'Delete error', e); }
+    };
+
+    /* ── callNeuralNode — single call to /audit, server handles Gemini→Groq fallback ── */
+    window.callNeuralNode = async prompt => {
+        const base = (window.WORKER_URL || '').replace(/\/$/, '');
+        if (!base || base === '__WORKER_URL__') throw new Error('Server proxy not configured.');
+
+        const res = await fetch(`${base}/audit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt })
+        });
+
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || `Server error ${res.status}`);
+
+        neuralTelemetry('Engine', `Response via ${d.engine}`);
+        return d.result;
+    };
+
+    lucide.createIcons();
+</script>
+</body>
+</html>
