@@ -469,19 +469,19 @@
                         <div class="check-chip active" id="tests-toggle"><span class="dot"></span>Generate Unit Tests</div>
                     </div>
                     <div style="display:flex;gap:8px;align-items:center">
-                        <button class="btn-primary" onclick="runSentinel()" style="flex:1">RUN SENTINEL AUDIT</button>
-                        <button class="btn-ghost" onclick="clearSentinel()">CLEAR</button>
+                        <button class="btn-primary" onclick="runSentinel()" style="flex:1">PERFORM SENTINEL AUDIT</button>
+                        <button class="btn-ghost" onclick="clearSentinel()">REMOVE</button>
                         <span style="font-family:var(--font-mono);font-size:10px;color:var(--muted)" id="sentinelLineCount">0 lines</span>
                     </div>
                 </div>
                 <div id="sentinelIdle" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:240px;border:1px dashed var(--border);border-radius:16px;gap:10px">
                     <i data-lucide="bot" style="width:36px;height:36px;color:var(--border-bright)"></i>
                     <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);letter-spacing:2px">SENTINEL STANDING BY</div>
-                    <div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);opacity:0.6">Paste AI-generated code above to begin</div>
+                    <div style="font-family:var(--font-mono);font-size:9px;color:var(--muted);opacity:0.6">Paste AI-generated code above to start</div>
                 </div>
                 <div id="sentinelLoading" style="display:none;flex-direction:column;align-items:center;justify-content:center;height:240px;gap:16px">
                     <div class="spinner"></div>
-                    <div class="loading-phase" id="sentinelPhase">INITIALIZING SENTINEL...</div>
+                    <div class="loading-phase" id="sentinelPhase">INITIALIZING THE SENTINEL...</div>
                     <div class="loading-steps" id="sentinelSteps"></div>
                 </div>
                 <div id="sentinelResults" style="display:none"></div>
