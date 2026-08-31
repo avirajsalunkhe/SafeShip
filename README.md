@@ -1,5 +1,5 @@
 # SafeShip — Neural Trace Engine
-
+ 
 ## Overview 🚀
 
 SafeShip is a fully client-side, AI-powered security auditing tool delivered as a single HTML file. It allows developers, security researchers, and students to analyze URLs, uploaded code files, or pasted snippets directly in the browser. The app uses Google Gemini as the primary AI engine, with Groq LLaMA as an automatic fallback. When Firebase is configured, SafeShip also persists audit history per anonymous user session.
